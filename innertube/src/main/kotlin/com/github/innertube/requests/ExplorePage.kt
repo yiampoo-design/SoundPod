@@ -1,16 +1,13 @@
 package com.github.innertube.requests
 
 import io.ktor.client.call.body
-import io.ktor.client.plugins.ClientRequestException
 import io.ktor.client.plugins.ResponseException
-import io.ktor.client.request.HttpRequestBuilder
-import io.ktor.client.request.headers
 import io.ktor.client.request.post
 import io.ktor.client.request.setBody
-import io.ktor.client.statement.HttpResponse
 import io.ktor.client.statement.bodyAsText
 import io.ktor.http.isSuccess
 import com.github.innertube.Innertube
+import com.github.innertube.Innertube.applyYouTubeMusicClient
 import com.github.innertube.models.BrowseResponse
 import com.github.innertube.models.MusicCarouselShelfRenderer
 import com.github.innertube.models.YouTubeClient
@@ -21,50 +18,55 @@ import com.github.innertube.utils.runCatchingNonCancellable
 import java.util.Locale
 import java.util.logging.Logger
 
-private val chartsLogger = Logger.getLogger("YiamTube-Innertube")
+private val httpLogger = Logger.getLogger("YiamTube-HTTP")
+private val innertubeLogger = Logger.getLogger("YiamTube-Innertube")
 
-// Candidate order is FEmusic_charts → FEmusic_home → FEmusic_explore.
-// FEcharts is intentionally NOT first because it currently returns HTTP 400
-// ("Request contains an invalid argument") from YouTube and would block the
-// rest of the candidates if used as the primary. We re-introduce it only if
-// upstream evidence proves it is still valid.
-private val chartsBrowseIds = listOf(
-    "FEmusic_charts",
-    "FEmusic_home",
-    "FEmusic_explore",
-)
+// FEmusic_charts needs a "params" field to be accepted by current YouTube
+// Music. The Metrolist-style value is "ggMGCgQIgAQ%3D" (base64 of the
+// chart-specific selection params).
+private const val CHARTS_PARAMS = "ggMGCgQIgAQ%3D"
 
+/**
+ * Charts endpoint (FEmusic_charts) with the proper params.
+ *
+ * Per current maintained YouTube Music clients (Metrolist-style) the
+ * FEmusic_charts browse requires a non-empty `params` field. The Home and
+ * Explore endpoints use a *different* response structure and must NOT be
+ * parsed with the chart-specific logic.
+ */
 suspend fun Innertube.charts(): Result<List<Innertube.SongItem>?>? = runCatchingNonCancellable {
-    if (!hasRequiredTokens) {
-        waitForSession(timeoutMs = 10000)
-    }
-
+    val ytClient = YouTubeClient.WEB_REMIX
+    val gl = Locale.getDefault().country.ifBlank { "US" }
     val visitorDataPresent = !visitorData.isNullOrBlank()
-    chartsLogger.fine("charts() start visitorDataPresent=$visitorDataPresent clientName=WEB_REMIX clientVersion=${YouTubeClient.WEB_REMIX.clientVersion} gl=${Locale.getDefault().country.ifBlank { "US" }} hl=en")
+    val browseId = "FEmusic_charts"
+    val params = CHARTS_PARAMS
+    val bodyBytes = try {
+        kotlinx.serialization.json.Json.encodeToString(
+            com.github.innertube.models.bodies.BrowseBody.serializer(),
+            BrowseBody(
+                browseId = browseId,
+                params = params,
+                context = ytClient.toContext(
+                    hl = "en",
+                    gl = gl,
+                    visitorData = visitorData,
+                )
+            )
+        ).length
+    } catch (_: Exception) { 0 }
 
-    val firstValid = chartsBrowseIds.firstNotNullOfOrNull { browseId ->
-        fetchCharts(browseId, visitorDataPresent)
-    }
+    httpLogger.fine("charts http-start client=WEB_REMIX clientId=${ytClient.clientId} version=${ytClient.clientVersion} visitorDataPresent=$visitorDataPresent browseId=$browseId gl=$gl hl=en")
 
-    if (firstValid == null) {
-        chartsLogger.warning("charts() all candidates failed: ${chartsBrowseIds.joinToString(",")}")
-    }
-    firstValid
-}
-
-private suspend fun Innertube.fetchCharts(
-    browseId: String,
-    visitorDataPresent: Boolean
-): List<Innertube.SongItem>? {
-    chartsLogger.fine("charts($browseId) start visitorDataPresent=$visitorDataPresent")
-    val response: HttpResponse = try {
+    val response = try {
         client.post(BROWSE) {
+            applyYouTubeMusicClient(ytClient, visitorData)
             setBody(
                 BrowseBody(
                     browseId = browseId,
-                    context = YouTubeClient.WEB_REMIX.toContext(
+                    params = params,
+                    context = ytClient.toContext(
                         hl = "en",
-                        gl = Locale.getDefault().country.ifBlank { "US" },
+                        gl = gl,
                         visitorData = visitorData,
                     )
                 )
@@ -74,26 +76,27 @@ private suspend fun Innertube.fetchCharts(
         val status = e.response.status.value
         val errorBody = try { e.response.bodyAsText() } catch (_: Exception) { "" }
         val sanitised = errorBody.take(200).replace("\n", " ")
-        chartsLogger.warning("charts($browseId) failed clientName=WEB_REMIX clientVersion=${YouTubeClient.WEB_REMIX.clientVersion} visitorDataPresent=$visitorDataPresent status=$status type=${e.javaClass.simpleName} msg=$sanitised")
-        return null
+        innertubeLogger.warning("charts http-fail client=WEB_REMIX version=${ytClient.clientVersion} visitorDataPresent=$visitorDataPresent status=$status type=${e.javaClass.simpleName} msg=$sanitised")
+        return@runCatchingNonCancellable null
     } catch (e: Exception) {
-        chartsLogger.warning("charts($browseId) failed clientName=WEB_REMIX clientVersion=${YouTubeClient.WEB_REMIX.clientVersion} visitorDataPresent=$visitorDataPresent type=${e.javaClass.simpleName} msg=${e.message?.take(200)}")
-        return null
+        innertubeLogger.warning("charts http-fail client=WEB_REMIX version=${ytClient.clientVersion} visitorDataPresent=$visitorDataPresent type=${e.javaClass.simpleName} msg=${e.message?.take(200)}")
+        return@runCatchingNonCancellable null
     }
 
     val status = response.status.value
+    val rawText = try { response.bodyAsText() } catch (_: Exception) { "" }
+    val rawBytes = rawText.length
     if (!response.status.isSuccess()) {
-        val errorBody = try { response.bodyAsText() } catch (_: Exception) { "" }
-        val sanitised = errorBody.take(200).replace("\n", " ")
-        chartsLogger.warning("charts($browseId) failed clientName=WEB_REMIX clientVersion=${YouTubeClient.WEB_REMIX.clientVersion} visitorDataPresent=$visitorDataPresent status=$status msg=$sanitised")
-        return null
+        val sanitised = rawText.take(200).replace("\n", " ")
+        innertubeLogger.warning("charts http-fail client=WEB_REMIX version=${ytClient.clientVersion} visitorDataPresent=$visitorDataPresent status=$status bytes=$rawBytes body=$sanitised")
+        return@runCatchingNonCancellable null
     }
 
     val body: BrowseResponse = try {
         response.body()
     } catch (e: Exception) {
-        chartsLogger.warning("charts($browseId) parse failed visitorDataPresent=$visitorDataPresent type=${e.javaClass.simpleName} msg=${e.message?.take(200)}")
-        return null
+        innertubeLogger.warning("charts parse-fail client=WEB_REMIX visitorDataPresent=$visitorDataPresent bytes=$rawBytes type=${e.javaClass.simpleName} msg=${e.message?.take(200)}")
+        return@runCatchingNonCancellable null
     }
 
     val sectionListRenderer = body.contents?.sectionListRenderer
@@ -106,24 +109,80 @@ private suspend fun Innertube.fetchCharts(
         ?.mapNotNull(MusicCarouselShelfRenderer.Content::musicResponsiveListItemRenderer)
         ?.mapNotNull(Innertube.SongItem::from)
         ?.takeIf { it.isNotEmpty() }
+
     if (items == null) {
-        chartsLogger.fine("charts($browseId) status=$status items=0 (empty response, continuing)")
+        innertubeLogger.warning("charts parse-ok-but-empty client=WEB_REMIX visitorDataPresent=$visitorDataPresent status=$status bytes=$rawBytes")
     } else {
-        chartsLogger.fine("charts($browseId) status=$status items=${items.size}")
+        innertubeLogger.fine("charts parse-ok client=WEB_REMIX visitorDataPresent=$visitorDataPresent status=$status bytes=$rawBytes items=${items.size}")
     }
-    return items
+    items
+}
+
+/**
+ * Home endpoint (FEmusic_home). Used for general home page content.
+ * Different response structure from Charts.
+ */
+suspend fun Innertube.home(): Result<BrowseResponse?>? = runCatchingNonCancellable {
+    val ytClient = YouTubeClient.WEB_REMIX
+    val gl = Locale.getDefault().country.ifBlank { "US" }
+    val visitorDataPresent = !visitorData.isNullOrBlank()
+    val browseId = "FEmusic_home"
+
+    httpLogger.fine("home http-start client=WEB_REMIX clientId=${ytClient.clientId} version=${ytClient.clientVersion} visitorDataPresent=$visitorDataPresent browseId=$browseId gl=$gl hl=en")
+
+    val response = try {
+        client.post(BROWSE) {
+            applyYouTubeMusicClient(ytClient, visitorData)
+            setBody(
+                BrowseBody(
+                    browseId = browseId,
+                    context = ytClient.toContext(
+                        hl = "en",
+                        gl = gl,
+                        visitorData = visitorData,
+                    )
+                )
+            )
+        }
+    } catch (e: ResponseException) {
+        val status = e.response.status.value
+        val errorBody = try { e.response.bodyAsText() } catch (_: Exception) { "" }
+        val sanitised = errorBody.take(200).replace("\n", " ")
+        innertubeLogger.warning("home http-fail client=WEB_REMIX visitorDataPresent=$visitorDataPresent status=$status type=${e.javaClass.simpleName} msg=$sanitised")
+        return@runCatchingNonCancellable null
+    } catch (e: Exception) {
+        innertubeLogger.warning("home http-fail client=WEB_REMIX visitorDataPresent=$visitorDataPresent type=${e.javaClass.simpleName} msg=${e.message?.take(200)}")
+        return@runCatchingNonCancellable null
+    }
+
+    val status = response.status.value
+    val rawText = try { response.bodyAsText() } catch (_: Exception) { "" }
+    if (!response.status.isSuccess()) {
+        val sanitised = rawText.take(200).replace("\n", " ")
+        innertubeLogger.warning("home http-fail client=WEB_REMIX visitorDataPresent=$visitorDataPresent status=$status body=$sanitised")
+        return@runCatchingNonCancellable null
+    }
+
+    val body: BrowseResponse = try {
+        response.body()
+    } catch (e: Exception) {
+        innertubeLogger.warning("home parse-fail client=WEB_REMIX visitorDataPresent=$visitorDataPresent type=${e.javaClass.simpleName} msg=${e.message?.take(200)}")
+        return@runCatchingNonCancellable null
+    }
+
+    val sectionCount = body.contents?.sectionListRenderer?.contents?.size ?: 0
+    innertubeLogger.fine("home parse-ok client=WEB_REMIX visitorDataPresent=$visitorDataPresent status=$status bytes=${rawText.length} sections=$sectionCount")
+    body
 }
 
 suspend fun Innertube.newReleases(): Result<List<Innertube.AlbumItem>?>? = runCatchingNonCancellable {
-    if (!hasRequiredTokens) {
-        waitForSession(timeoutMs = 10000)
-    }
-
+    val ytClient = YouTubeClient.WEB_REMIX
     val response = client.post(BROWSE) {
+        applyYouTubeMusicClient(ytClient, visitorData)
         setBody(
             BrowseBody(
                 browseId = "FEmusic_new_releases",
-                context = YouTubeClient.WEB_REMIX.toContext(
+                context = ytClient.toContext(
                     hl = "en",
                     gl = Locale.getDefault().country.ifBlank { "US" },
                 )

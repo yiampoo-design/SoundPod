@@ -7,6 +7,7 @@ import io.ktor.client.request.setBody
 import io.ktor.client.statement.bodyAsText
 import io.ktor.http.isSuccess
 import com.github.innertube.Innertube
+import com.github.innertube.Innertube.applyYouTubeMusicClient
 import com.github.innertube.models.ContinuationResponse
 import com.github.innertube.models.MusicShelfRenderer
 import com.github.innertube.models.SearchResponse
@@ -32,6 +33,7 @@ suspend fun <T : Innertube.Item> Innertube.searchPage(
 
     val response = try {
         client.post(SEARCH) {
+            applyYouTubeMusicClient(ytClient, visitorData)
             setBody(
                 SearchBody(
                     context = ytClient.toContext(
