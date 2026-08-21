@@ -7,24 +7,21 @@ import androidx.compose.runtime.setValue
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.github.innertube.Innertube
-import com.github.soundpod.appContext
 import com.github.soundpod.db
 import com.github.soundpod.enums.QuickPicksSource
 import com.github.soundpod.models.Song
 import com.github.soundpod.utils.NewPipeMusicHelper
 import com.github.soundpod.utils.NewPipeSong
 import com.github.soundpod.utils.ScreenCache
+import com.github.soundpod.utils.asMediaItem
 import com.github.soundpod.utils.isScreenCacheEnabledKey
 import com.github.soundpod.utils.preferences
 import com.github.soundpod.utils.quickPicksCustomGenreKey
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
-import kotlinx.coroutines.async
-import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
-import java.io.IOException
 
 class QuickPicksViewModel : ViewModel() {
     var relatedPageResult: Result<Innertube.RelatedPage?>? by mutableStateOf(null)
@@ -68,29 +65,8 @@ class QuickPicksViewModel : ViewModel() {
         ScreenCache.save(PERSISTENT_CACHE_PREFIX + source.name, page)
     }
 
-    private fun <T : Innertube.Item> interleave(lists: List<List<T>>): List<T> {
-        val result = mutableListOf<T>()
-        val iterators = lists.map { it.iterator() }
-        val seenKeys = mutableSetOf<String>()
-
-        var hasMore = true
-        while (hasMore) {
-            hasMore = false
-            for (iterator in iterators) {
-                if (iterator.hasNext()) {
-                    val item = iterator.next()
-                    if (seenKeys.add(item.key)) {
-                        result.add(item)
-                    }
-                    hasMore = true
-                }
-            }
-        }
-        return result
-    }
-
     fun loadQuickPicks(quickPicksSource: QuickPicksSource, forceRefresh: Boolean = false) {
-        val isScreenCacheEnabled = appContext.preferences.getBoolean(isScreenCacheEnabledKey, true)
+        val isScreenCacheEnabled = com.github.soundpod.appContext.preferences.getBoolean(isScreenCacheEnabledKey, true)
         val cached = if (isScreenCacheEnabled) getCached(quickPicksSource) else null
         if (cached != null) {
             relatedPageResult = Result.success(cached)
@@ -107,9 +83,7 @@ class QuickPicksViewModel : ViewModel() {
             relatedPageResult = Result.failure(IllegalStateException("Loading…"))
 
             try {
-                // NEW APPROACH: Use NewPipeExtractor first since the custom Innertube module
-                // has been failing due to YouTube's tightened anti-bot checks. NewPipeExtractor
-                // is maintained by the NewPipe community and has been kept up to date.
+                // Use NewPipeExtractor (community-maintained, kept up to date with YouTube).
                 val songs = loadViaNewPipeExtractor(quickPicksSource)
                 if (songs.isNotEmpty()) {
                     val page = Innertube.RelatedPage(
@@ -123,22 +97,9 @@ class QuickPicksViewModel : ViewModel() {
                         saveToCache(quickPicksSource, page)
                     }
                     relatedPageResult = Result.success(page)
-                    return@launch
-                }
-
-                Log.w(TAG, "NewPipeExtractor returned 0 songs, trying custom Innertube as last resort")
-
-                // LAST RESORT: Try custom Innertube module (original approach)
-                val innertubePage = loadViaInnertube(quickPicksSource)
-                if (innertubePage != null && !innertubePage.songs.isNullOrEmpty()) {
-                    Log.d(TAG, "Innertube returned ${innertubePage.songs?.size ?: 0} songs")
-                    if (isScreenCacheEnabled) {
-                        saveToCache(quickPicksSource, innertubePage)
-                    }
-                    relatedPageResult = Result.success(innertubePage)
                 } else {
-                    val err = Exception("Both NewPipeExtractor and Innertube returned no data. Check logcat tag $TAG.")
-                    Log.e(TAG, "All sources exhausted", err)
+                    val err = Exception("NewPipeExtractor returned no songs. Check logcat tag $TAG for details.")
+                    Log.e(TAG, "No songs returned", err)
                     relatedPageResult = Result.failure(err)
                 }
             } catch (e: Exception) {
@@ -149,8 +110,8 @@ class QuickPicksViewModel : ViewModel() {
     }
 
     /**
-     * NEW APPROACH: Use NewPipeExtractor to fetch charts and related videos.
-     * This library is maintained by the NewPipe community and uses its own
+     * Uses NewPipeExtractor to fetch charts and related videos.
+     * NewPipeExtractor is maintained by the NewPipe community and uses its own
      * internal request handling that has been kept up to date with YouTube's
      * anti-bot changes.
      */
@@ -158,7 +119,7 @@ class QuickPicksViewModel : ViewModel() {
         return try {
             val songs = mutableListOf<NewPipeSong>()
 
-            // 1. Try to get trending charts from NewPipe
+            // 1. Get trending charts from NewPipe
             val trending = NewPipeMusicHelper.fetchTrendingSongs(limit = 10)
             songs.addAll(trending)
             Log.d(TAG, "NewPipe trending: ${trending.size} songs")
@@ -181,7 +142,7 @@ class QuickPicksViewModel : ViewModel() {
 
             // 3. If still not enough, try a search
             if (songs.size < 5 && source == QuickPicksSource.Custom) {
-                val customGenre = appContext.preferences.getString(quickPicksCustomGenreKey, "ROCK") ?: "ROCK"
+                val customGenre = com.github.soundpod.appContext.preferences.getString(quickPicksCustomGenreKey, "ROCK") ?: "ROCK"
                 val search = NewPipeMusicHelper.search(customGenre, limit = 10)
                 songs.addAll(search)
             }
@@ -202,82 +163,14 @@ class QuickPicksViewModel : ViewModel() {
         }
     }
 
-    /**
-     * ORIGINAL APPROACH: Use custom Innertube module.
-     * Kept as a fallback for the unlikely case that NewPipeExtractor also fails
-     * but the custom module might still work.
-     */
-    private suspend fun loadViaInnertube(source: QuickPicksSource): Innertube.RelatedPage? {
-        val seedSongs = when (source) {
-            QuickPicksSource.Custom -> {
-                val customGenre = appContext.preferences.getString(quickPicksCustomGenreKey, "ROCK") ?: "ROCK"
-                runCatching {
-                    Innertube.searchPage(
-                        query = customGenre,
-                        params = Innertube.SearchFilter.Song.value,
-                        fromMusicShelfRendererContent = Innertube.SongItem.Companion::from
-                    )?.getOrNull()
-                }.getOrNull()?.items?.take(3)?.map { item ->
-                    Song(
-                        id = item.key,
-                        title = item.asMediaItem.mediaMetadata.title.toString(),
-                        artistsText = item.asMediaItem.mediaMetadata.artist.toString(),
-                        durationText = null,
-                        thumbnailUrl = item.asMediaItem.mediaMetadata.artworkUri.toString()
-                    )
-                } ?: emptyList()
-            }
-            QuickPicksSource.Default -> {
-                runCatching {
-                    val seeds = mutableListOf<Song>()
-                    seeds.addAll(db.history(limit = 2, minPlayTimeMs = MIN_HISTORY_PLAY_TIME_MS).first())
-
-                    if (seeds.size < 3) {
-                        runCatching {
-                            Innertube.charts()?.getOrNull()?.take(3 - seeds.size)?.forEach { item ->
-                                seeds.add(
-                                    Song(
-                                        id = item.key,
-                                        title = item.asMediaItem.mediaMetadata.title.toString(),
-                                        artistsText = item.asMediaItem.mediaMetadata.artist.toString(),
-                                        durationText = null,
-                                        thumbnailUrl = item.asMediaItem.mediaMetadata.artworkUri.toString()
-                                    )
-                                )
-                            }
-                        }
-                    }
-                    seeds.distinctBy { it.id }
-                }.getOrNull() ?: emptyList()
-            }
-        }
-
-        if (seedSongs.isEmpty()) return null
-
-        return coroutineScope {
-            val results = seedSongs.map { song ->
-                async { runCatching { Innertube.relatedPage(videoId = song.id)?.getOrNull() }.getOrNull() }
-            }.map { it.await() }.filterNotNull()
-
-            if (results.isEmpty()) return@coroutineScope null
-
-            Innertube.RelatedPage(
-                songs = interleave(results.map { it.songs ?: emptyList() }).take(40),
-                playlists = interleave(results.map { it.playlists ?: emptyList() }).take(15),
-                albums = interleave(results.map { it.albums ?: emptyList() }).take(15),
-                artists = interleave(results.map { it.artists ?: emptyList() }).take(15)
-            )
-        }
-    }
-
     private fun NewPipeSong.toSongItem(): Innertube.SongItem {
         return Innertube.SongItem(
-            info = com.github.innertube.Innertube.Info(
+            info = Innertube.Info(
                 name = title,
                 endpoint = com.github.innertube.models.NavigationEndpoint.Endpoint.Watch(videoId = id)
             ),
             authors = if (artist != null) listOf(
-                com.github.innertube.Innertube.Info(
+                Innertube.Info(
                     name = artist,
                     endpoint = com.github.innertube.models.NavigationEndpoint.Endpoint.Browse(browseId = "UC$artist")
                 )

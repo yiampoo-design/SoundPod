@@ -1,92 +1,89 @@
 package com.github.soundpod.utils
 
 import android.util.Log
-import com.github.innertube.Innertube
+import com.github.soundpod.NewPipeDownloader
 import com.github.soundpod.appContext
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
-import org.schabi.newpipe.extractor.InfoItem
 import org.schabi.newpipe.extractor.NewPipe
 import org.schabi.newpipe.extractor.StreamingService
 import org.schabi.newpipe.extractor.exceptions.ExtractionException
 import org.schabi.newpipe.extractor.kiosk.KioskInfo
-import org.schabi.newpipe.extractor.linkhandler.ListLinkHandlerFactory
 import org.schabi.newpipe.extractor.localization.ContentCountry
 import org.schabi.newpipe.extractor.localization.Localization
-import org.schabi.newpipe.extractor.playlist.PlaylistInfo
 import org.schabi.newpipe.extractor.search.SearchInfo
-import org.schabi.newpipe.extractor.services.youtube.YoutubeService
 import org.schabi.newpipe.extractor.stream.StreamInfo
 import org.schabi.newpipe.extractor.stream.StreamInfoItem
+import org.schabi.newpipe.extractor.stream.StreamType
 import java.util.Locale
 
 /**
  * Helper that uses NewPipeExtractor (already battle-tested against YouTube's
  * anti-bot) to fetch music content. The custom Innertube module in this app
- * has been returning 403s as YouTube tightened checks, so this is a
- * fallback that uses a different code path.
+ * has been returning 403s as YouTube tightened checks, so this is the
+ * primary data source now.
  *
- * NewPipeExtractor was maintained by the NewPipe community and kept up to
+ * NewPipeExtractor is maintained by the NewPipe community and kept up to
  * date with YouTube's API changes.
  */
 object NewPipeMusicHelper {
     private const val TAG = "YiamTube-NewPipe"
 
-    // Kiosk IDs for YouTube Music charts / trending.
-    // NewPipeExtractor exposes them via the KioskList, but the URL is stable.
-    private const val CHARTS_URL = "https://www.youtube.com/feed/trending?bp=4gINGgt5dG1hX2NoYXJ0cw%3D%3D" // Music trending
-    private const val CHARTS_URL_ALT = "https://www.youtube.com/feed/trending" // generic trending
+    // Kiosk URL for YouTube Music charts / trending.
+    // bp=4gINGgt5dG1hX2NoYXJ0cw== selects the "Music" trending category.
+    private const val CHARTS_URL_MUSIC = "https://www.youtube.com/feed/trending?bp=4gINGgt5dG1hX2NoYXJ0cw%3D%3D"
+    private const val CHARTS_URL_GENERIC = "https://www.youtube.com/feed/trending"
+
+    // Music songs filter for search
+    private val MUSIC_SONGS_FILTER = listOf("EgKAQgIIAUICVAXgAw%3D%3D")
 
     init {
         // Make sure NewPipe is initialised with localisation matching the app.
         runCatching {
             NewPipe.init(
-                com.github.soundpod.NewPipeDownloader.getInstance(),
+                NewPipeDownloader.getInstance(),
                 Localization.fromLocale(Locale.getDefault()),
                 ContentCountry(Locale.getDefault().country.ifBlank { "US" })
             )
         }.onFailure { Log.w(TAG, "NewPipe init failed: ${it.message}") }
     }
 
-    private val service: StreamingService
-        get() = NewPipe.getService(StreamingService.LinkHandlerFactory::class.java.let {
-            try { ServiceHelper.service } catch (e: Throwable) { NewPipe.getService(0) }
-        })
+    /** YouTube service. Always registered first by NewPipeExtractor (id 0). */
+    private val service: StreamingService by lazy { NewPipe.getService(0) }
 
     /**
      * Fetch trending songs using NewPipeExtractor's KioskInfo.
-     * Returns null on failure (logged with full details).
+     * Returns empty list on failure (logged with full details).
      */
     suspend fun fetchTrendingSongs(limit: Int = 10): List<NewPipeSong> = withContext(Dispatchers.IO) {
         try {
-            val youtubeServiceId = NewPipe.getIdOfService("YouTube")
-            val listUrl = CHARTS_URL
-            Log.d(TAG, "Fetching trending from: $listUrl")
-
-            val info = KioskInfo.getInfo(youtubeServiceId, listUrl)
+            Log.d(TAG, "Fetching trending from: $CHARTS_URL_MUSIC")
+            val info = KioskInfo.getInfo(service, CHARTS_URL_MUSIC)
             val songs = info.relatedItems
                 .filterIsInstance<StreamInfoItem>()
-                .filter { it.streamType == StreamInfoItem.StreamType.AUDIO_STREAM }
+                .filter { it.streamType == StreamType.AUDIO_STREAM }
                 .take(limit)
-                .map { item ->
-                    NewPipeSong(
-                        id = extractVideoId(item.url),
-                        title = item.name,
-                        artist = item.uploaderName,
-                        duration = item.duration,
-                        thumbnailUrl = item.thumbnails.firstOrNull()?.url,
-                        url = item.url
-                    )
-                }
+                .map { it.toNewPipeSong() }
             Log.d(TAG, "Got ${songs.size} trending songs from NewPipeExtractor")
             songs
         } catch (e: ExtractionException) {
-            Log.e(TAG, "NewPipe extraction failed: ${e.message}", e)
-            emptyList()
+            Log.w(TAG, "Music charts extraction failed, trying generic: ${e.message}")
+            tryFallbackTrending(limit)
         } catch (e: Exception) {
             Log.e(TAG, "Trending fetch failed: ${e.message}", e)
             emptyList()
         }
+    }
+
+    private fun tryFallbackTrending(limit: Int): List<NewPipeSong> = try {
+        val info = KioskInfo.getInfo(service, CHARTS_URL_GENERIC)
+        info.relatedItems
+            .filterIsInstance<StreamInfoItem>()
+            .take(limit)
+            .map { it.toNewPipeSong() }
+    } catch (e: Exception) {
+        Log.e(TAG, "Generic trending also failed: ${e.message}", e)
+        emptyList()
     }
 
     /**
@@ -98,18 +95,9 @@ object NewPipeMusicHelper {
             val info = StreamInfo.getInfo(url)
             val related = info.relatedItems
                 .filterIsInstance<StreamInfoItem>()
-                .filter { it.streamType == StreamInfoItem.StreamType.AUDIO_STREAM }
+                .filter { it.streamType == StreamType.AUDIO_STREAM }
                 .take(limit)
-                .map { item ->
-                    NewPipeSong(
-                        id = extractVideoId(item.url),
-                        title = item.name,
-                        artist = item.uploaderName,
-                        duration = item.duration,
-                        thumbnailUrl = item.thumbnails.firstOrNull()?.url,
-                        url = item.url
-                    )
-                }
+                .map { it.toNewPipeSong() }
             Log.d(TAG, "Got ${related.size} related songs for $videoId")
             related
         } catch (e: Exception) {
@@ -123,34 +111,37 @@ object NewPipeMusicHelper {
      */
     suspend fun search(query: String, limit: Int = 10): List<NewPipeSong> = withContext(Dispatchers.IO) {
         try {
-            val youtubeServiceId = NewPipe.getIdOfService("YouTube")
-            val info = SearchInfo.getInfo(
-                youtubeServiceId,
-                "https://www.youtube.com/results?search_query=${java.net.URLEncoder.encode(query, "UTF-8")}&sp=EgKAQgIIAUICVAXgAw%3D%3D"
-            )
+            val handler = service.searchQHFactory.fromQuery(query, MUSIC_SONGS_FILTER, "")
+            val info = SearchInfo.getInfo(service, handler)
             info.relatedItems
                 .filterIsInstance<StreamInfoItem>()
                 .take(limit)
-                .map { item ->
-                    NewPipeSong(
-                        id = extractVideoId(item.url),
-                        title = item.name,
-                        artist = item.uploaderName,
-                        duration = item.duration,
-                        thumbnailUrl = item.thumbnails.firstOrNull()?.url,
-                        url = item.url
-                    )
-                }
+                .map { it.toNewPipeSong() }
         } catch (e: Exception) {
             Log.e(TAG, "Search failed for '$query': ${e.message}", e)
             emptyList()
         }
     }
 
-    private fun extractVideoId(url: String): String =
-        url.substringAfter("v=", "").substringBefore("&").substringBefore("?")
+    private fun StreamInfoItem.toNewPipeSong(): NewPipeSong {
+        return NewPipeSong(
+            id = extractVideoId(url),
+            title = name,
+            artist = uploaderName,
+            duration = duration,
+            thumbnailUrl = thumbnails.firstOrNull()?.url,
+            url = url
+        )
+    }
+
+    private fun extractVideoId(url: String): String {
+        if (url.isBlank()) return ""
+        return url.substringAfter("v=", "")
+            .substringBefore("&")
+            .substringBefore("?")
             .ifBlank { url.substringAfter("youtu.be/").substringBefore("?") }
             .ifBlank { url.hashCode().toString() }
+    }
 }
 
 data class NewPipeSong(
@@ -161,8 +152,3 @@ data class NewPipeSong(
     val thumbnailUrl: String?,
     val url: String
 )
-
-/** Simple helper to get the YouTube service id without importing internal classes. */
-private object ServiceHelper {
-    val service: Int get() = NewPipe.getIdOfService("YouTube")
-}
