@@ -17,7 +17,11 @@ data class Context(
         val userAgent: String,
         val gl: String? = null,
         val hl: String? = null,
-        val visitorData: String? = null
+        val visitorData: String? = null,
+        // YouTube's signature timestamp — required by WEB_REMIX and TVHTML5 clients
+        // to prove the request originates from a real browser. Without this, YouTube
+        // returns 403 Forbidden or removes streamingData from the response.
+        val signatureTimestamp: Long? = null
     )
 
     @Serializable
