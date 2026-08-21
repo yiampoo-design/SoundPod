@@ -95,7 +95,7 @@ fun MiniPlayerContent(
         contentAlignment = Alignment.BottomCenter,
         modifier = Modifier
             .fillMaxWidth()
-            .height(60.dp)
+            .height(72.dp)
             .clip(MaterialTheme.shapes.extraLarge)
             .clickable(
                 interactionSource = remember { MutableInteractionSource() },

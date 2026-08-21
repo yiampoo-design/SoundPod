@@ -159,11 +159,11 @@ fun SharedPlayer(
 
         val systemBottomPadding = scaffoldPadding.calculateBottomPadding()
         val activeBottomPadding = lerp(systemBottomPadding, 0.dp, expandProgress).coerceAtLeast(0.dp)
-        val playerHeight = lerp(60.dp, exactScreenHeight, expandProgress).coerceAtLeast(0.dp)
+        val playerHeight = lerp(72.dp, exactScreenHeight, expandProgress).coerceAtLeast(0.dp)
 
         val cornerRadius = lerp(28.dp, 0.dp, expandProgress).coerceAtLeast(0.dp)
 
-        CompositionLocalProvider(value = LocalPlayerPadding provides (60.dp + systemBottomPadding)) {
+        CompositionLocalProvider(value = LocalPlayerPadding provides (72.dp + systemBottomPadding)) {
             Surface(
                 color = MaterialTheme.colorScheme.background,
                 modifier = Modifier
@@ -311,7 +311,7 @@ fun SharedPlayer(
                                         val currentH = constraints.maxHeight
                                         val pad = activeBottomPadding.roundToPx()
                                         val sysPad = systemBottomPadding.roundToPx()
-                                        val miniH = 60.dp.roundToPx()
+                                        val miniH = 72.dp.roundToPx()
 
                                         val placeable = measurable.measure(
                                             androidx.compose.ui.unit.Constraints.fixed(screenW, miniH)
