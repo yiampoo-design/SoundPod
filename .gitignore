@@ -22,3 +22,6 @@ local.properties
 .artifacts
 output-metadata.json
 gradle-daemon-jvm.properties
+
+# Local scratch dir for temp scripts (e.g. one-off Python rewrites during dev)
+/.tmp/
