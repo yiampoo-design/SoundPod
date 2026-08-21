@@ -12,6 +12,9 @@ import com.github.innertube.utils.findSectionByTitle
 import com.github.innertube.utils.from
 import com.github.innertube.utils.runCatchingNonCancellable
 import java.util.Locale
+import java.util.logging.Logger
+
+private val chartsLogger = Logger.getLogger("YiamTube-Innertube")
 
 suspend fun Innertube.charts(): Result<List<Innertube.SongItem>?>? = runCatchingNonCancellable {
     if (!hasRequiredTokens) {
@@ -19,23 +22,25 @@ suspend fun Innertube.charts(): Result<List<Innertube.SongItem>?>? = runCatching
     }
 
     suspend fun fetchCharts(browseId: String): List<Innertube.SongItem>? {
-        val response = client.post(BROWSE) {
-            setBody(
-                BrowseBody(
-                    browseId = browseId,
-                    context = YouTubeClient.WEB_REMIX.toContext(
-                        hl = "en",
-                        gl = Locale.getDefault().country.ifBlank { "US" },
+        val response = try {
+            client.post(BROWSE) {
+                setBody(
+                    BrowseBody(
+                        browseId = browseId,
+                        context = YouTubeClient.WEB_REMIX.toContext(
+                            hl = "en",
+                            gl = Locale.getDefault().country.ifBlank { "US" },
+                        )
                     )
                 )
-            )
-        }.body<BrowseResponse>()
+            }.body<BrowseResponse>()
+        } catch (e: Exception) {
+            logInnertubeFailure("charts($browseId)", e)
+            return null
+        }
 
-        val sectionListRenderer = response
-            .contents
-            ?.sectionListRenderer
-
-        return (sectionListRenderer?.findSectionByTitle("Top songs")
+        val sectionListRenderer = response.contents?.sectionListRenderer
+        val items = (sectionListRenderer?.findSectionByTitle("Top songs")
             ?: sectionListRenderer?.findSectionByTitle("Top music videos")
             ?: sectionListRenderer?.findSectionByTitle("Trending")
             ?: sectionListRenderer?.contents?.firstOrNull { it.musicCarouselShelfRenderer != null })
@@ -44,6 +49,12 @@ suspend fun Innertube.charts(): Result<List<Innertube.SongItem>?>? = runCatching
             ?.mapNotNull(MusicCarouselShelfRenderer.Content::musicResponsiveListItemRenderer)
             ?.mapNotNull(Innertube.SongItem::from)
             ?.takeIf { it.isNotEmpty() }
+        if (items == null) {
+            chartsLogger.fine("charts($browseId) response had no extractable items")
+        } else {
+            logInnertubeSuccess("charts($browseId)", "items=${items.size}")
+        }
+        return items
     }
 
     fetchCharts("FEcharts") ?: fetchCharts("FEmusic_charts") ?: fetchCharts("FEmusic_home") ?: fetchCharts("FEmusic_explore")

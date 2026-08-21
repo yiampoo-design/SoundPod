@@ -14,6 +14,9 @@ import io.ktor.client.request.setBody
 import io.ktor.http.ContentType
 import io.ktor.http.contentType
 import kotlinx.serialization.Serializable
+import java.util.logging.Logger
+
+private val playerLogger = Logger.getLogger("YiamTube-Innertube")
 
 @Serializable
 private data class AudioStream(
@@ -27,37 +30,67 @@ private data class PipedResponse(
 )
 
 suspend fun Innertube.player(videoId: String) = runCatchingNonCancellable {
-    val response = client.post(PLAYER) {
-        setBody(
-            PlayerBody(
-                context = YouTubeClient.ANDROID_VR.toContext(visitorData = visitorData),
-                videoId = videoId,
-                serviceIntegrityDimensions = poToken?.let { ServiceIntegrityDimensions(poToken = it) }
-            )
-        )
-        mask("playabilityStatus.status,playerConfig.audioConfig,streamingData.adaptiveFormats,streamingData.formats,videoDetails.videoId")
-    }.body<PlayerResponse>()
-
-    if (response.playabilityStatus?.status == "OK") {
-        return@runCatchingNonCancellable response.applyDecipher(decipher)
-    }
-    else {
-        val safePlayerResponse = client.post(PLAYER) {
+    playerLogger.fine("player($videoId) starting with ANDROID_VR")
+    val response = try {
+        client.post(PLAYER) {
             setBody(
                 PlayerBody(
-                    context = YouTubeClient.TVHTML5_SIMPLY_EMBEDDED_PLAYER.toContext(visitorData = visitorData).copy(
-                        thirdParty = Context.ThirdParty(
-                            embedUrl = "https://www.youtube.com/watch?v=$videoId"
-                        )
-                    ),
-                    videoId = videoId
+                    context = YouTubeClient.ANDROID_VR.toContext(visitorData = visitorData),
+                    videoId = videoId,
+                    serviceIntegrityDimensions = poToken?.let { ServiceIntegrityDimensions(poToken = it) }
                 )
             )
             mask("playabilityStatus.status,playerConfig.audioConfig,streamingData.adaptiveFormats,streamingData.formats,videoDetails.videoId")
         }.body<PlayerResponse>()
+    } catch (e: Exception) {
+        playerLogger.warning("player($videoId) ANDROID_VR request failed: ${e.javaClass.simpleName} ${e.message?.take(200)}")
+        null
+    }
 
-        if (safePlayerResponse.playabilityStatus?.status != "OK") {
-            return@runCatchingNonCancellable response.applyDecipher(decipher)
+    if (response != null) {
+        val status = response.playabilityStatus?.status
+        val hasStreamingData = response.streamingData != null
+        val formatCount = (response.streamingData?.adaptiveFormats?.size ?: 0) +
+                          (response.streamingData?.formats?.size ?: 0)
+        playerLogger.fine("player($videoId) ANDROID_VR playability=$status streamingData=$hasStreamingData formats=$formatCount")
+    }
+
+    if (response != null && response.playabilityStatus?.status == "OK") {
+        return@runCatchingNonCancellable response.applyDecipher(decipher)
+    }
+    else {
+        playerLogger.fine("player($videoId) falling back to TVHTML5_SIMPLY_EMBEDDED_PLAYER")
+        val safePlayerResponse = try {
+            client.post(PLAYER) {
+                setBody(
+                    PlayerBody(
+                        context = YouTubeClient.TVHTML5_SIMPLY_EMBEDDED_PLAYER.toContext(visitorData = visitorData).copy(
+                            thirdParty = Context.ThirdParty(
+                                embedUrl = "https://www.youtube.com/watch?v=$videoId"
+                            )
+                        ),
+                        videoId = videoId
+                    )
+                )
+                mask("playabilityStatus.status,playerConfig.audioConfig,streamingData.adaptiveFormats,streamingData.formats,videoDetails.videoId")
+            }.body<PlayerResponse>()
+        } catch (e: Exception) {
+            playerLogger.warning("player($videoId) TVHTML5 request failed: ${e.javaClass.simpleName} ${e.message?.take(200)}")
+            null
+        }
+
+        if (safePlayerResponse == null) {
+            return@runCatchingNonCancellable response?.applyDecipher(decipher)
+        }
+
+        val safeStatus = safePlayerResponse.playabilityStatus?.status
+        val safeHasStreamingData = safePlayerResponse.streamingData != null
+        val safeFormatCount = (safePlayerResponse.streamingData?.adaptiveFormats?.size ?: 0) +
+                              (safePlayerResponse.streamingData?.formats?.size ?: 0)
+        playerLogger.fine("player($videoId) TVHTML5 playability=$safeStatus streamingData=$safeHasStreamingData formats=$safeFormatCount")
+
+        if (safeStatus != "OK") {
+            return@runCatchingNonCancellable response?.applyDecipher(decipher)
         }
 
         val audioStreams = runCatching {
@@ -65,6 +98,7 @@ suspend fun Innertube.player(videoId: String) = runCatchingNonCancellable {
                 contentType(ContentType.Application.Json)
             }.body<PipedResponse>().audioStreams
         }.getOrNull() ?: emptyList()
+        playerLogger.fine("player($videoId) Piped fallback streams=${audioStreams.size}")
 
         if (audioStreams.isEmpty()) {
             return@runCatchingNonCancellable safePlayerResponse.applyDecipher(decipher)

@@ -11,6 +11,7 @@ import io.ktor.client.HttpClient
 import io.ktor.client.call.body
 import io.ktor.client.engine.okhttp.OkHttp
 import io.ktor.client.plugins.HttpTimeout
+import io.ktor.client.plugins.ResponseException
 import io.ktor.client.plugins.compression.ContentEncoding
 import io.ktor.client.plugins.contentnegotiation.ContentNegotiation
 import io.ktor.client.plugins.defaultRequest
@@ -26,8 +27,12 @@ import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
 import java.util.Locale
+import java.util.logging.Level
+import java.util.logging.Logger
 import kotlin.time.Duration.Companion.milliseconds
 import kotlin.time.Duration.Companion.seconds
+
+private val innertubeLogger: Logger = Logger.getLogger("YiamTube-Innertube")
 
 object Innertube {
 
@@ -91,13 +96,42 @@ object Innertube {
     }
 
     suspend fun fetchVisitorData(): String? {
-        return runCatching {
+        val result = runCatching {
             client.post("https://music.youtube.com/youtubei/v1/music/get_search_suggestions") {
                 setBody(mapOf("context" to YouTubeClient.WEB_REMIX.toContext(localized = false), "input" to ""))
             }.body<VisitorDataResponse>().responseContext.visitorData
-        }.getOrNull()?.also {
-            visitorData = it
         }
+        val visitor = result.getOrNull()
+        if (visitor != null) {
+            innertubeLogger.fine("fetchVisitorData ok (len=${visitor.length})")
+            visitorData = visitor
+        } else {
+            logInnertubeFailure("fetchVisitorData", result.exceptionOrNull())
+        }
+        return visitor
+    }
+
+    /**
+     * Light-weight diagnostic helper. Logs:
+     * - endpoint name
+     * - HTTP status (when available)
+     * - exception type
+     * - sanitised message
+     * Never logs cookies, tokens, visitor data, or full signed URLs.
+     */
+    internal fun logInnertubeFailure(endpoint: String, throwable: Throwable?) {
+        val status = (throwable as? ResponseException)?.response?.status?.value
+        val type = throwable?.javaClass?.simpleName ?: "null"
+        val msg = throwable?.message?.take(200) ?: "no exception (null result)"
+        if (status != null) {
+            innertubeLogger.warning("$endpoint failed: $type status=$status msg=$msg")
+        } else {
+            innertubeLogger.warning("$endpoint failed: $type msg=$msg")
+        }
+    }
+
+    internal fun logInnertubeSuccess(endpoint: String, details: String = "") {
+        innertubeLogger.fine("$endpoint ok $details".trim())
     }
 
     suspend fun waitForSession(timeoutMs: Long = 10000): Boolean {
