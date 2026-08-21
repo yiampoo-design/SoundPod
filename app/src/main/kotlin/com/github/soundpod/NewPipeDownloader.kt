@@ -1,9 +1,7 @@
 package com.github.soundpod
 
-import com.github.innertube.Innertube
+import android.util.Log
 import com.github.innertube.models.PlayerResponse
-import com.github.innertube.requests.player
-import kotlinx.coroutines.runBlocking
 import kotlinx.serialization.json.Json
 import okhttp3.Cache
 import okhttp3.OkHttpClient
@@ -15,6 +13,22 @@ import java.io.File
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.TimeUnit
 
+/**
+ * NewPipeExtractor's downloader. Used by NewPipeExtractor internals to fetch
+ * YouTube watch pages and base.js scripts.
+ *
+ * IMPORTANT: We do NOT call Innertube.player() here anymore. If we did, then
+ * "NewPipe as fallback" would actually be "NewPipe -> Innertube -> YouTube",
+ * which defeats the purpose of having NewPipe as an independent fallback when
+ * Innertube is failing.
+ *
+ * Instead, we:
+ *  - Serve a minimal HTML response for YouTube watch URLs so NewPipeExtractor
+ *    doesn't fail outright (it will then fall back to its own internal page
+ *    fetch via the OkHttp client below).
+ *  - Use the OkHttp client to make all HTTP requests ourselves, so the
+ *    NewPipeExtractor path is truly independent of Innertube.
+ */
 class NewPipeDownloader private constructor() : Downloader() {
     private val client = OkHttpClient.Builder()
         .cache(Cache(File(MainApplication.appContext.cacheDir, "newpipe_cache"), 10 * 1024 * 1024))
@@ -36,45 +50,39 @@ class NewPipeDownloader private constructor() : Downloader() {
 
     fun preCache(videoId: String, playerResponse: PlayerResponse) {
         playerResponseCache[videoId] = playerResponse to System.currentTimeMillis()
+        Log.d(TAG, "preCache for $videoId")
     }
 
     override fun execute(request: Request): Response {
         val url = request.url()
         val method = request.httpMethod()
 
+        // base.js caching — safe and useful
         if (method == "GET" && url.contains("base.js")) {
             if (jsUrlFile.exists() && jsUrlFile.readText() == url && jsCacheFile.exists()) {
                 val lastModified = jsCacheFile.lastModified()
                 if (System.currentTimeMillis() - lastModified < TimeUnit.DAYS.toMillis(1)) {
+                    Log.d(TAG, "base.js cache hit for $url")
                     return Response(200, "OK", mapOf("Content-Type" to listOf("application/javascript")), jsCacheFile.readText(), url)
                 }
             }
         }
 
+        // For YouTube watch URLs, we deliberately serve an empty page so
+        // NewPipeExtractor doesn't depend on Innertube. NewPipeExtractor will
+        // then make its own HTTP request through the OkHttp client below
+        // to actually fetch the page contents.
         if (method == "GET" && (url.contains("youtube.com/watch?v=") || url.contains("music.youtube.com/watch?v="))) {
             val videoId = url.substringAfter("v=").substringBefore("&").substringBefore("?")
             if (videoId.length == 11) {
-                val currentTime = System.currentTimeMillis()
-                val cached = playerResponseCache[videoId]
-
-                if (cached != null && (currentTime - cached.second) < TimeUnit.MINUTES.toMillis(5)) {
-                    val playerResponseJson = json.encodeToString(cached.first)
-                    val html = "<html><head><script>var ytInitialPlayerResponse = $playerResponseJson;</script></head><body></body></html>"
-                    return Response(200, "OK", mapOf("Content-Type" to listOf("text/html")), html, url)
-                }
-
-                try {
-                    val playerResponse = runBlocking { Innertube.player(videoId) }?.getOrNull()?.also {
-                        playerResponseCache[videoId] = it to currentTime
-                    }
-
-                    if (playerResponse != null) {
-                        val playerResponseJson = json.encodeToString(playerResponse)
-                        val html = "<html><head><script>var ytInitialPlayerResponse = $playerResponseJson;</script></head><body></body></html>"
-                        return Response(200, "OK", mapOf("Content-Type" to listOf("text/html")), html, url)
-                    }
-                } catch (_: Exception) {
-                }
+                Log.d(TAG, "Serving minimal watch HTML for $videoId (NewPipeExtractor will fetch its own page)")
+                return Response(
+                    200,
+                    "OK",
+                    mapOf("Content-Type" to listOf("text/html")),
+                    "<html><head></head><body></body></html>",
+                    url
+                )
             }
         }
 
@@ -95,7 +103,12 @@ class NewPipeDownloader private constructor() : Downloader() {
 
         builder.method(method, requestBody)
 
-        val response = client.newCall(builder.build()).execute()
+        val response = try {
+            client.newCall(builder.build()).execute()
+        } catch (e: Exception) {
+            Log.w(TAG, "HTTP request failed: $url — ${e.message}")
+            throw e
+        }
         val body = response.body.string()
 
         if (method == "GET" && url.contains("base.js") && response.isSuccessful) {
@@ -113,6 +126,7 @@ class NewPipeDownloader private constructor() : Downloader() {
     }
 
     companion object {
+        private const val TAG = "YiamTube-NewPipe"
         private var instance: NewPipeDownloader? = null
 
         fun getInstance(): NewPipeDownloader {

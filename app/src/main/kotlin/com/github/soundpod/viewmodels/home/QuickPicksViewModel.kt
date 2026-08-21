@@ -7,11 +7,15 @@ import androidx.compose.runtime.setValue
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.github.innertube.Innertube
+import com.github.innertube.requests.artistPage
+import com.github.innertube.requests.charts
+import com.github.innertube.requests.relatedPage
+import com.github.innertube.requests.searchPage
+import com.github.innertube.utils.from
+import com.github.soundpod.appContext
 import com.github.soundpod.db
 import com.github.soundpod.enums.QuickPicksSource
 import com.github.soundpod.models.Song
-import com.github.soundpod.utils.NewPipeMusicHelper
-import com.github.soundpod.utils.NewPipeSong
 import com.github.soundpod.utils.ScreenCache
 import com.github.soundpod.utils.asMediaItem
 import com.github.soundpod.utils.isScreenCacheEnabledKey
@@ -19,6 +23,8 @@ import com.github.soundpod.utils.preferences
 import com.github.soundpod.utils.quickPicksCustomGenreKey
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.async
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
@@ -32,16 +38,7 @@ class QuickPicksViewModel : ViewModel() {
         private const val TAG = "YiamTube-QuickPicks"
         private const val CACHE_EXPIRATION = 30 * 60 * 1000L
         private const val PERSISTENT_CACHE_PREFIX = "quick_picks_cache_v2_"
-        private const val MIN_HISTORY_PLAY_TIME_MS = 30000L
-
-        // Global fallback video IDs (used only as a last resort)
-        private val GLOBAL_FALLBACKS = listOf(
-            "fJ9rUzIMcZQ", // Queen - Bohemian Rhapsody
-            "kJQP7kiw5Fk", // Despacito
-            "JGwWNGJdvx8", // Ed Sheeran - Shape of You
-            "9bZkp7q19f0", // PSY - Gangnam Style
-            "OPf0YbXqDm0"  // Maroon 5 - Girls Like You
-        )
+        private const val MIN_HISTORY_PLAY_TIME_MS = 30000L // 30 seconds
     }
 
     init {
@@ -65,8 +62,29 @@ class QuickPicksViewModel : ViewModel() {
         ScreenCache.save(PERSISTENT_CACHE_PREFIX + source.name, page)
     }
 
+    private fun <T : Innertube.Item> interleave(lists: List<List<T>>): List<T> {
+        val result = mutableListOf<T>()
+        val iterators = lists.map { it.iterator() }
+        val seenKeys = mutableSetOf<String>()
+        
+        var hasMore = true
+        while (hasMore) {
+            hasMore = false
+            for (iterator in iterators) {
+                if (iterator.hasNext()) {
+                    val item = iterator.next()
+                    if (seenKeys.add(item.key)) {
+                        result.add(item)
+                    }
+                    hasMore = true
+                }
+            }
+        }
+        return result
+    }
+
     fun loadQuickPicks(quickPicksSource: QuickPicksSource, forceRefresh: Boolean = false) {
-        val isScreenCacheEnabled = com.github.soundpod.appContext.preferences.getBoolean(isScreenCacheEnabledKey, true)
+        val isScreenCacheEnabled = appContext.preferences.getBoolean(isScreenCacheEnabledKey, true)
         val cached = if (isScreenCacheEnabled) getCached(quickPicksSource) else null
         if (cached != null) {
             relatedPageResult = Result.success(cached)
@@ -80,110 +98,129 @@ class QuickPicksViewModel : ViewModel() {
         job?.cancel()
         job = viewModelScope.launch(Dispatchers.IO) {
             Log.d(TAG, "Loading Quick Picks (source=$quickPicksSource, force=$forceRefresh)")
-            relatedPageResult = Result.failure(IllegalStateException("Loading…"))
+            val seedSongs = when (quickPicksSource) {
+                QuickPicksSource.Custom -> {
+                    val customGenre = appContext.preferences.getString(quickPicksCustomGenreKey, "ROCK") ?: "ROCK"
+                    val searchResult = Innertube.searchPage(
+                        query = customGenre,
+                        params = Innertube.SearchFilter.Song.value,
+                        fromMusicShelfRendererContent = Innertube.SongItem.Companion::from
+                    )?.getOrNull()
 
-            try {
-                // Use NewPipeExtractor (community-maintained, kept up to date with YouTube).
-                val songs = loadViaNewPipeExtractor(quickPicksSource)
-                if (songs.isNotEmpty()) {
-                    val page = Innertube.RelatedPage(
-                        songs = songs.map { it.toSongItem() },
-                        playlists = emptyList(),
-                        albums = emptyList(),
-                        artists = emptyList()
-                    )
-                    Log.d(TAG, "NewPipeExtractor returned ${songs.size} songs")
-                    if (isScreenCacheEnabled) {
-                        saveToCache(quickPicksSource, page)
+                    searchResult?.items?.take(3)?.map { item ->
+                        val mediaItem = item.asMediaItem
+                        Song(
+                            id = mediaItem.mediaId,
+                            title = mediaItem.mediaMetadata.title.toString(),
+                            artistsText = mediaItem.mediaMetadata.artist.toString(),
+                            durationText = null,
+                            thumbnailUrl = mediaItem.mediaMetadata.artworkUri.toString()
+                        )
+                    } ?: emptyList()
+                }
+
+                QuickPicksSource.Default -> {
+                    val seeds = mutableListOf<Song>()
+
+                    // 1. Add seeds from History
+                    seeds.addAll(db.history(limit = 2, minPlayTimeMs = MIN_HISTORY_PLAY_TIME_MS).first())
+
+                    // 2. Add seeds from Following
+                    val followed = db.followedArtists().first()
+                    if (followed.isNotEmpty()) {
+                        followed.shuffled().take(2).forEach { artist ->
+                            Innertube.artistPage(browseId = artist.id)?.getOrNull()?.songs?.firstOrNull()?.let { item ->
+                                val mediaItem = item.asMediaItem
+                                seeds.add(
+                                    Song(
+                                        id = mediaItem.mediaId,
+                                        title = mediaItem.mediaMetadata.title.toString(),
+                                        artistsText = mediaItem.mediaMetadata.artist.toString(),
+                                        durationText = null,
+                                        thumbnailUrl = mediaItem.mediaMetadata.artworkUri.toString()
+                                    )
+                                )
+                            }
+                        }
                     }
-                    relatedPageResult = Result.success(page)
-                } else {
-                    val err = Exception("NewPipeExtractor returned no songs. Check logcat tag $TAG for details.")
-                    Log.e(TAG, "No songs returned", err)
-                    relatedPageResult = Result.failure(err)
+
+                    // 3. Add seeds from Charts if we don't have enough
+                    if (seeds.size < 3) {
+                        Innertube.charts()?.getOrNull()?.take(3 - seeds.size)?.forEach { item ->
+                            val mediaItem = item.asMediaItem
+                            seeds.add(
+                                Song(
+                                    id = mediaItem.mediaId,
+                                    title = mediaItem.mediaMetadata.title.toString(),
+                                    artistsText = mediaItem.mediaMetadata.artist.toString(),
+                                    durationText = null,
+                                    thumbnailUrl = mediaItem.mediaMetadata.artworkUri.toString()
+                                )
+                            )
+                        }
+                    }
+                    
+                    if (seeds.isEmpty()) {
+                        seeds.addAll(getSeedSongsFlow(quickPicksSource, 3).first())
+                    }
+                    
+                    seeds.distinctBy { it.id }
                 }
-            } catch (e: Exception) {
-                Log.e(TAG, "Failed to load Quick Picks: ${e.message}", e)
-                relatedPageResult = Result.failure(e)
+            }
+
+            coroutineScope {
+                val chartsDeferred = async {
+                    runCatching { Innertube.charts()?.getOrNull() }
+                        .onFailure { Log.w(TAG, "Innertube.charts failed: ${it.message}") }
+                        .getOrNull()
+                }
+
+                val relatedDeferreds = seedSongs.map { song ->
+                    async {
+                        runCatching { Innertube.relatedPage(videoId = song.id)?.getOrNull() }
+                            .onFailure { Log.w(TAG, "Innertube.relatedPage(${song.id}) failed: ${it.message}") }
+                            .getOrNull()
+                    }
+                }
+
+                val relatedResults = relatedDeferreds.mapNotNull { it.await() }
+                Log.d(TAG, "Related-page results: ${relatedResults.size}/${seedSongs.size} succeeded")
+
+                var mergedPage = if (relatedResults.isNotEmpty()) {
+                    Innertube.RelatedPage(
+                        songs = interleave(relatedResults.map { it.songs ?: emptyList() }).take(40),
+                        playlists = interleave(relatedResults.map { it.playlists ?: emptyList() }).take(15),
+                        albums = interleave(relatedResults.map { it.albums ?: emptyList() }).take(15),
+                        artists = interleave(relatedResults.map { it.artists ?: emptyList() }).take(15)
+                    )
+                } else null
+
+                if (mergedPage == null || mergedPage.songs.isNullOrEmpty()) {
+                    chartsDeferred.await()?.shuffled()?.take(2)?.forEach { fallbackSong ->
+                        val fallbackResult = Innertube.relatedPage(videoId = fallbackSong.key)?.getOrNull()
+                        if (fallbackResult != null && !fallbackResult.songs.isNullOrEmpty()) {
+                            mergedPage = fallbackResult
+                            return@forEach
+                        }
+                    }
+                }
+
+                if (mergedPage == null || mergedPage.songs.isNullOrEmpty()) {
+                    val globalFallbacks = listOf("fJ9rUzIMcZQ", "kJQP7kiw5Fk", "JGwWNGJdvx8")
+                    mergedPage = Innertube.relatedPage(videoId = globalFallbacks.random())?.getOrNull()
+                }
+
+                val finalResult = mergedPage?.let { Result.success(it) } 
+                    ?: Result.failure(Exception("Failed to load Quick Picks"))
+
+                finalResult.getOrNull()?.let {
+                    if (isScreenCacheEnabled) {
+                        saveToCache(quickPicksSource, it)
+                    }
+                }
+
+                relatedPageResult = finalResult
             }
         }
-    }
-
-    /**
-     * Uses NewPipeExtractor to fetch charts and related videos.
-     * NewPipeExtractor is maintained by the NewPipe community and uses its own
-     * internal request handling that has been kept up to date with YouTube's
-     * anti-bot changes.
-     */
-    private suspend fun loadViaNewPipeExtractor(source: QuickPicksSource): List<NewPipeSong> {
-        return try {
-            val songs = mutableListOf<NewPipeSong>()
-
-            // 1. Get trending charts from NewPipe
-            val trending = NewPipeMusicHelper.fetchTrendingSongs(limit = 10)
-            songs.addAll(trending)
-            Log.d(TAG, "NewPipe trending: ${trending.size} songs")
-
-            // 2. If we have seed songs from history, use them for related
-            if (songs.size < 5) {
-                val historySeeds = try {
-                    db.history(limit = 3, minPlayTimeMs = MIN_HISTORY_PLAY_TIME_MS).first()
-                } catch (e: Exception) {
-                    Log.w(TAG, "Failed to read history: ${e.message}")
-                    emptyList()
-                }
-
-                historySeeds.forEach { seed ->
-                    val related = NewPipeMusicHelper.fetchRelated(seed.id, limit = 5)
-                    songs.addAll(related)
-                    if (songs.size >= 15) return@forEach
-                }
-            }
-
-            // 3. If still not enough, try a search
-            if (songs.size < 5 && source == QuickPicksSource.Custom) {
-                val customGenre = com.github.soundpod.appContext.preferences.getString(quickPicksCustomGenreKey, "ROCK") ?: "ROCK"
-                val search = NewPipeMusicHelper.search(customGenre, limit = 10)
-                songs.addAll(search)
-            }
-
-            // 4. Last resort: try global fallbacks
-            if (songs.size < 3) {
-                for (id in GLOBAL_FALLBACKS) {
-                    val related = NewPipeMusicHelper.fetchRelated(id, limit = 3)
-                    songs.addAll(related)
-                    if (songs.size >= 10) break
-                }
-            }
-
-            songs.distinctBy { it.id }
-        } catch (e: Exception) {
-            Log.e(TAG, "NewPipe approach failed: ${e.message}", e)
-            emptyList()
-        }
-    }
-
-    private fun NewPipeSong.toSongItem(): Innertube.SongItem {
-        return Innertube.SongItem(
-            info = Innertube.Info(
-                name = title,
-                endpoint = com.github.innertube.models.NavigationEndpoint.Endpoint.Watch(videoId = id)
-            ),
-            authors = if (artist != null) listOf(
-                Innertube.Info(
-                    name = artist,
-                    endpoint = com.github.innertube.models.NavigationEndpoint.Endpoint.Browse(browseId = "UC$artist")
-                )
-            ) else null,
-            album = null,
-            durationText = null,
-            thumbnail = thumbnailUrl?.let {
-                com.github.innertube.models.Thumbnail(
-                    url = it,
-                    width = 320,
-                    height = 320
-                )
-            }
-        )
     }
 }
