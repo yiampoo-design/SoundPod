@@ -58,10 +58,24 @@ class PlayerMediaSourceProvider(
     private val urlCache = ConcurrentHashMap<String, CacheEntry>()
     private val failedProvidersForAttempt = ConcurrentHashMap<String, MutableSet<String>>()
     private val resolutionLocks = ConcurrentHashMap<String, ReentrantLock>()
+    private val attemptCounter = ConcurrentHashMap<String, Int>()
 
     fun injectUrl(videoId: String, uri: Uri, provider: String = "manual") {
         urlCache[videoId] = CacheEntry(uri, provider, System.currentTimeMillis())
         Log.d(TAG_DATA, "injectUrl($videoId) provider=$provider")
+    }
+
+    /**
+     * Reset the failed-provider state for a videoId. Should be called when
+     * the player starts a fresh playback attempt — e.g. user hit "play" again,
+     * skipped to a new track, or restored from a paused state. Without this,
+     * a 403 from provider A would permanently mark A as failed for that
+     * videoId for the lifetime of the process.
+     */
+    fun resetForNewPlaybackAttempt(videoId: String) {
+        failedProvidersForAttempt.remove(videoId)
+        attemptCounter.remove(videoId)
+        Log.d(TAG_RESOLVER, "Reset failed-providers state for $videoId")
     }
 
     companion object {
@@ -75,6 +89,9 @@ class PlayerMediaSourceProvider(
         // Provider identifiers
         private const val PROVIDER_INNERTUBE = "innertube"
         private const val PROVIDER_NEWPIPE = "newpipe"
+        // Maximum resolve attempts before resetting failed-providers state,
+        // to prevent permanent blacklisting of a provider for a track.
+        private const val MAX_ATTEMPTS_BEFORE_RESET = 5
     }
 
     fun createMediaSourceFactory(): MediaSource.Factory {
@@ -141,15 +158,32 @@ class PlayerMediaSourceProvider(
                 }
             }
 
-            // Reset the failed-providers set for this attempt
+            // BUG 3 fix: do NOT clear failedProvidersForAttempt on every entry.
+            // A 403 from provider A must survive into the immediate retry so
+            // that the next call tries provider B. The state is cleared:
+            //   - on success (below) so the next call to the same track is fresh
+            //   - by resetForNewPlaybackAttempt(videoId) when the user starts
+            //     a fresh playback attempt
+            //   - after MAX_ATTEMPTS_BEFORE_RESET retries to avoid permanent
+            //     blacklisting a provider
             val failed = failedProvidersForAttempt.getOrPut(videoId) { mutableSetOf() }
-            failed.clear()
+            val attempts = attemptCounter.merge(videoId, 1) { old, _ -> old + 1 } ?: 1
+
+            if (attempts > MAX_ATTEMPTS_BEFORE_RESET) {
+                Log.w(TAG_RESOLVER, "Hit $attempts resolve attempts for $videoId; resetting failed-providers state")
+                failed.clear()
+                attemptCounter[videoId] = 1
+            }
 
             // 1) Try Innertube
             if (PROVIDER_INNERTUBE !in failed) {
                 val innertubeUri = tryInnertube(videoId)
                 if (innertubeUri != null) {
                     urlCache[videoId] = CacheEntry(innertubeUri, PROVIDER_INNERTUBE, System.currentTimeMillis())
+                    // Success — clear the failure set so a future retry of
+                    // the same track starts fresh.
+                    failed.clear()
+                    attemptCounter.remove(videoId)
                     return@withLock innertubeUri
                 }
                 failed.add(PROVIDER_INNERTUBE)
@@ -160,13 +194,15 @@ class PlayerMediaSourceProvider(
                 val newpipeUri = tryNewPipe(videoId)
                 if (newpipeUri != null) {
                     urlCache[videoId] = CacheEntry(newpipeUri, PROVIDER_NEWPIPE, System.currentTimeMillis())
+                    failed.clear()
+                    attemptCounter.remove(videoId)
                     return@withLock newpipeUri
                 }
                 failed.add(PROVIDER_NEWPIPE)
             }
 
             // Both providers failed. Throw so Media3 surfaces the error to the user.
-            val msg = "No playable URL found for $videoId (Innertube + NewPipe both failed)"
+            val msg = "No playable URL found for $videoId (Innertube + NewPipe both failed) after $attempts attempts"
             Log.e(TAG_RESOLVER, msg)
             throw java.io.IOException(msg)
         }
