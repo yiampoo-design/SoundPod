@@ -82,6 +82,11 @@ enum class YouTubeClient(
         userAgent = "com.google.android.apps.youtube.vr.oculus/1.61.48 (Linux; U; Android 12; en_US; Oculus Quest 3; Build/SQ3A.220605.009.A1; Cronet/132.0.6808.3)",
         osVersion = "12",
         clientId = "28",
+        // ANDROID_VR returns stream URLs that need a signature timestamp to
+        // be playable. Without it, the URLs come back unsigned or with a
+        // signature that expires immediately. The other playback clients
+        // (ANDROID, TVHTML5, WEB_REMIX) already include it.
+        useSignatureTimestamp = true,
         includeUserAgentInContext = true
     ),
     MAC_SAFARI_WEB_REMIX(
