@@ -15,19 +15,18 @@ import java.util.concurrent.TimeUnit
 
 /**
  * NewPipeExtractor's downloader. Used by NewPipeExtractor internals to fetch
- * YouTube watch pages and base.js scripts.
+ * YouTube watch pages, base.js scripts, and any other HTTP request that
+ * NewPipeExtractor needs to do its own page parsing.
  *
- * IMPORTANT: We do NOT call Innertube.player() here anymore. If we did, then
+ * IMPORTANT: We do NOT call Innertube.player() here. If we did, then
  * "NewPipe as fallback" would actually be "NewPipe -> Innertube -> YouTube",
  * which defeats the purpose of having NewPipe as an independent fallback when
  * Innertube is failing.
  *
- * Instead, we:
- *  - Serve a minimal HTML response for YouTube watch URLs so NewPipeExtractor
- *    doesn't fail outright (it will then fall back to its own internal page
- *    fetch via the OkHttp client below).
- *  - Use the OkHttp client to make all HTTP requests ourselves, so the
- *    NewPipeExtractor path is truly independent of Innertube.
+ * For every request (including YouTube watch pages), we use OkHttp to
+ * perform the real HTTP request and return the real response body, with
+ * NewPipeExtractor's headers preserved. This is what NewPipeExtractor
+ * expects and what the BUG 2 fix calls for.
  */
 class NewPipeDownloader private constructor() : Downloader() {
     private val client = OkHttpClient.Builder()
@@ -57,35 +56,28 @@ class NewPipeDownloader private constructor() : Downloader() {
         val url = request.url()
         val method = request.httpMethod()
 
-        // base.js caching — safe and useful
+        // base.js caching — safe and useful. NewPipeExtractor needs base.js
+        // to parse the YouTube signature function, so caching it for a day
+        // is a meaningful performance win.
         if (method == "GET" && url.contains("base.js")) {
             if (jsUrlFile.exists() && jsUrlFile.readText() == url && jsCacheFile.exists()) {
                 val lastModified = jsCacheFile.lastModified()
                 if (System.currentTimeMillis() - lastModified < TimeUnit.DAYS.toMillis(1)) {
                     Log.d(TAG, "base.js cache hit for $url")
-                    return Response(200, "OK", mapOf("Content-Type" to listOf("application/javascript")), jsCacheFile.readText(), url)
+                    return Response(
+                        200,
+                        "OK",
+                        mapOf("Content-Type" to listOf("application/javascript")),
+                        jsCacheFile.readText(),
+                        url
+                    )
                 }
             }
         }
 
-        // For YouTube watch URLs, we deliberately serve an empty page so
-        // NewPipeExtractor doesn't depend on Innertube. NewPipeExtractor will
-        // then make its own HTTP request through the OkHttp client below
-        // to actually fetch the page contents.
-        if (method == "GET" && (url.contains("youtube.com/watch?v=") || url.contains("music.youtube.com/watch?v="))) {
-            val videoId = url.substringAfter("v=").substringBefore("&").substringBefore("?")
-            if (videoId.length == 11) {
-                Log.d(TAG, "Serving minimal watch HTML for $videoId (NewPipeExtractor will fetch its own page)")
-                return Response(
-                    200,
-                    "OK",
-                    mapOf("Content-Type" to listOf("text/html")),
-                    "<html><head></head><body></body></html>",
-                    url
-                )
-            }
-        }
-
+        // BUG 2 fix: let the real HTTP request happen. We previously returned
+        // empty HTML for watch pages, which starved NewPipeExtractor of the
+        // page data it needs. Now we pass through to OkHttp.
         val headers = request.headers()
         val dataToSend = request.dataToSend()
 
@@ -106,7 +98,7 @@ class NewPipeDownloader private constructor() : Downloader() {
         val response = try {
             client.newCall(builder.build()).execute()
         } catch (e: Exception) {
-            Log.w(TAG, "HTTP request failed: $url — ${e.message}")
+            Log.w(TAG, "HTTP $method $url failed: ${e.message?.take(200)}")
             throw e
         }
         val body = response.body.string()
@@ -114,6 +106,12 @@ class NewPipeDownloader private constructor() : Downloader() {
         if (method == "GET" && url.contains("base.js") && response.isSuccessful) {
             jsUrlFile.writeText(url)
             jsCacheFile.writeText(body)
+        }
+
+        if (response.code in 400..599) {
+            Log.w(TAG, "HTTP $method $url -> ${response.code}")
+        } else {
+            Log.d(TAG, "HTTP $method $url -> ${response.code} (${body.length} bytes)")
         }
 
         return Response(
