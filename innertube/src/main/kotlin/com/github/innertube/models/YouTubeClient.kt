@@ -30,7 +30,12 @@ enum class YouTubeClient(
         clientId = "67",
         loginSupported = true,
         useSignatureTimestamp = true,
-        useWebPoTokens = true,
+        // useWebPoTokens is OFF for now: the SoundPod project does not
+        // generate PO tokens via BotGuard, so claiming we use them in the
+        // context body causes YouTube to return 400 "Request contains an
+        // invalid argument". Re-enable only once a real PO token source
+        // (WebView BotGuard or similar) is wired into Innertube.poToken.
+        useWebPoTokens = false,
     ),
     IOS(
         clientName = "IOS",
@@ -98,7 +103,7 @@ enum class YouTubeClient(
         clientId = "67",
         loginSupported = true,
         useSignatureTimestamp = true,
-        useWebPoTokens = true
+        useWebPoTokens = false
     );
 
     fun toContext(
