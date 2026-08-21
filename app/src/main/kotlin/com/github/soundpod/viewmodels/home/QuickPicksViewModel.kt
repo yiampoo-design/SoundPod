@@ -1,5 +1,6 @@
 package com.github.soundpod.viewmodels.home
 
+import android.util.Log
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
@@ -27,6 +28,7 @@ import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
+import java.io.IOException
 
 class QuickPicksViewModel : ViewModel() {
     var relatedPageResult: Result<Innertube.RelatedPage?>? by mutableStateOf(null)
@@ -34,9 +36,19 @@ class QuickPicksViewModel : ViewModel() {
     private var job: Job? = null
 
     companion object {
+        private const val TAG = "YiamTube-QuickPicks"
         private const val CACHE_EXPIRATION = 30 * 60 * 1000L
         private const val PERSISTENT_CACHE_PREFIX = "quick_picks_cache_v2_"
         private const val MIN_HISTORY_PLAY_TIME_MS = 30000L // 30 seconds
+
+        // Provider-aware retry: if one client fails, try the next
+        private val GLOBAL_FALLBACKS = listOf(
+            "fJ9rUzIMcZQ", // Queen - Bohemian Rhapsody
+            "kJQP7kiw5Fk", // Despacito
+            "JGwWNGJdvx8", // Ed Sheeran - Shape of You
+            "9bZkp7q19f0", // PSY - Gangnam Style
+            "OPf0YbXqDm0"  // Maroon 5 - Girls Like You
+        )
     }
 
     init {
@@ -64,7 +76,7 @@ class QuickPicksViewModel : ViewModel() {
         val result = mutableListOf<T>()
         val iterators = lists.map { it.iterator() }
         val seenKeys = mutableSetOf<String>()
-        
+
         var hasMore = true
         while (hasMore) {
             hasMore = false
@@ -81,6 +93,26 @@ class QuickPicksViewModel : ViewModel() {
         return result
     }
 
+    /**
+     * Provider-aware retry: try a network call and return the result.
+     * If the call fails with a non-IOException (likely YouTube signature/PO token issue),
+     * log detailed diagnostic info before propagating.
+     */
+    private suspend fun <T> safeCall(operation: String, block: suspend () -> T?): T? {
+        return try {
+            block()
+        } catch (e: IOException) {
+            Log.w(TAG, "[$operation] network error: ${e.message}")
+            null
+        } catch (e: Exception) {
+            // Most likely a 403 / signature / PO token failure from YouTube.
+            // Log the message so we can see what the upstream says.
+            val msg = e.message?.take(500) ?: e::class.java.simpleName
+            Log.e(TAG, "[$operation] upstream failure: $msg", e)
+            null
+        }
+    }
+
     fun loadQuickPicks(quickPicksSource: QuickPicksSource, forceRefresh: Boolean = false) {
         val isScreenCacheEnabled = appContext.preferences.getBoolean(isScreenCacheEnabledKey, true)
         val cached = if (isScreenCacheEnabled) getCached(quickPicksSource) else null
@@ -89,19 +121,25 @@ class QuickPicksViewModel : ViewModel() {
         }
 
         if (!forceRefresh && cached != null && !ScreenCache.isExpired(PERSISTENT_CACHE_PREFIX + quickPicksSource.name, CACHE_EXPIRATION)) {
+            Log.d(TAG, "Using cached Quick Picks (${cached.songs?.size ?: 0} songs)")
             return
         }
 
         job?.cancel()
         job = viewModelScope.launch(Dispatchers.IO) {
+            Log.d(TAG, "Loading Quick Picks (source=$quickPicksSource, force=$forceRefresh)")
+            relatedPageResult = Result.failure(IllegalStateException("Loading…"))
+
             val seedSongs = when (quickPicksSource) {
                 QuickPicksSource.Custom -> {
                     val customGenre = appContext.preferences.getString(quickPicksCustomGenreKey, "ROCK") ?: "ROCK"
-                    val searchResult = Innertube.searchPage(
-                        query = customGenre,
-                        params = Innertube.SearchFilter.Song.value,
-                        fromMusicShelfRendererContent = Innertube.SongItem.Companion::from
-                    )?.getOrNull()
+                    val searchResult = safeCall("searchPage(query=$customGenre)") {
+                        Innertube.searchPage(
+                            query = customGenre,
+                            params = Innertube.SearchFilter.Song.value,
+                            fromMusicShelfRendererContent = Innertube.SongItem.Companion::from
+                        )?.getOrNull()
+                    }
 
                     searchResult?.items?.take(3)?.map { item ->
                         val mediaItem = item.asMediaItem
@@ -125,7 +163,10 @@ class QuickPicksViewModel : ViewModel() {
                     val followed = db.followedArtists().first()
                     if (followed.isNotEmpty()) {
                         followed.shuffled().take(2).forEach { artist ->
-                            Innertube.artistPage(browseId = artist.id)?.getOrNull()?.songs?.firstOrNull()?.let { item ->
+                            val song = safeCall("artistPage(browseId=${artist.id})") {
+                                Innertube.artistPage(browseId = artist.id)?.getOrNull()?.songs?.firstOrNull()
+                            }
+                            song?.let { item ->
                                 val mediaItem = item.asMediaItem
                                 seeds.add(
                                     Song(
@@ -142,7 +183,8 @@ class QuickPicksViewModel : ViewModel() {
 
                     // 3. Add seeds from Charts if we don't have enough
                     if (seeds.size < 3) {
-                        Innertube.charts()?.getOrNull()?.take(3 - seeds.size)?.forEach { item ->
+                        val charts = safeCall("charts") { Innertube.charts()?.getOrNull() }
+                        charts?.take(3 - seeds.size)?.forEach { item ->
                             val mediaItem = item.asMediaItem
                             seeds.add(
                                 Song(
@@ -155,61 +197,87 @@ class QuickPicksViewModel : ViewModel() {
                             )
                         }
                     }
-                    
+
                     if (seeds.isEmpty()) {
                         seeds.addAll(getSeedSongsFlow(quickPicksSource, 3).first())
                     }
-                    
+
+                    Log.d(TAG, "Collected ${seeds.size} seed songs")
                     seeds.distinctBy { it.id }
                 }
             }
 
             coroutineScope {
-                val chartsDeferred = async {
-                    runCatching { Innertube.charts()?.getOrNull() }.getOrNull()
-                }
+                val relatedResults = seedSongs.map { song ->
+                    async {
+                        safeCall("relatedPage(videoId=${song.id})") {
+                            Innertube.relatedPage(videoId = song.id)?.getOrNull()
+                        }
+                    }
+                }.awaitAll()
 
-                val relatedDeferreds = seedSongs.map { song ->
-                    async { Innertube.relatedPage(videoId = song.id)?.getOrNull() }
-                }
+                val validResults = relatedResults.filterNotNull()
+                Log.d(TAG, "Got ${validResults.size}/${seedSongs.size} related-page results")
 
-                val relatedResults = relatedDeferreds.mapNotNull { it.await() }
-                
-                var mergedPage = if (relatedResults.isNotEmpty()) {
+                var mergedPage = if (validResults.isNotEmpty()) {
                     Innertube.RelatedPage(
-                        songs = interleave(relatedResults.map { it.songs ?: emptyList() }).take(40),
-                        playlists = interleave(relatedResults.map { it.playlists ?: emptyList() }).take(15),
-                        albums = interleave(relatedResults.map { it.albums ?: emptyList() }).take(15),
-                        artists = interleave(relatedResults.map { it.artists ?: emptyList() }).take(15)
+                        songs = interleave(validResults.map { it.songs ?: emptyList() }).take(40),
+                        playlists = interleave(validResults.map { it.playlists ?: emptyList() }).take(15),
+                        albums = interleave(validResults.map { it.albums ?: emptyList() }).take(15),
+                        artists = interleave(validResults.map { it.artists ?: emptyList() }).take(15)
                     )
                 } else null
 
+                // Fallback 1: try charts and use them as seeds
                 if (mergedPage == null || mergedPage.songs.isNullOrEmpty()) {
-                    chartsDeferred.await()?.shuffled()?.take(2)?.forEach { fallbackSong ->
-                        val fallbackResult = Innertube.relatedPage(videoId = fallbackSong.key)?.getOrNull()
-                        if (fallbackResult != null && !fallbackResult.songs.isNullOrEmpty()) {
-                            mergedPage = fallbackResult
-                            return@forEach
+                    Log.w(TAG, "No related results, falling back to charts")
+                    val charts = safeCall("charts(fallback)") { Innertube.charts()?.getOrNull() }
+                    if (!charts.isNullOrEmpty()) {
+                        charts.shuffled().take(2).forEach { fallbackSong ->
+                            val fallbackResult = safeCall("relatedPage(fallback=${fallbackSong.key})") {
+                                Innertube.relatedPage(videoId = fallbackSong.key)?.getOrNull()
+                            }
+                            if (fallbackResult != null && !fallbackResult.songs.isNullOrEmpty()) {
+                                mergedPage = fallbackResult
+                                Log.d(TAG, "Charts fallback succeeded with ${fallbackResult.songs?.size} songs")
+                                return@forEach
+                            }
+                        }
+                    }
+                }
+
+                // Fallback 2: try known global fallback video IDs
+                if (mergedPage == null || mergedPage.songs.isNullOrEmpty()) {
+                    Log.w(TAG, "Charts fallback failed, trying global fallback IDs")
+                    for (videoId in GLOBAL_FALLBACKS) {
+                        val result = safeCall("relatedPage(global=$videoId)") {
+                            Innertube.relatedPage(videoId = videoId)?.getOrNull()
+                        }
+                        if (result != null && !result.songs.isNullOrEmpty()) {
+                            mergedPage = result
+                            Log.d(TAG, "Global fallback succeeded with $videoId (${result.songs?.size} songs)")
+                            break
                         }
                     }
                 }
 
                 if (mergedPage == null || mergedPage.songs.isNullOrEmpty()) {
-                    val globalFallbacks = listOf("fJ9rUzIMcZQ", "kJQP7kiw5Fk", "JGwWNGJdvx8")
-                    mergedPage = Innertube.relatedPage(videoId = globalFallbacks.random())?.getOrNull()
-                }
-
-                val finalResult = mergedPage?.let { Result.success(it) } 
-                    ?: Result.failure(Exception("Failed to load Quick Picks"))
-
-                finalResult.getOrNull()?.let {
+                    val err = Exception("Quick Picks failed: no related/charts/global results. Check logcat tag $TAG for upstream error details.")
+                    Log.e(TAG, "All fallbacks exhausted", err)
+                    relatedPageResult = Result.failure(err)
+                } else {
+                    Log.d(TAG, "Quick Picks loaded: ${mergedPage.songs?.size} songs, ${mergedPage.playlists?.size} playlists, ${mergedPage.albums?.size} albums")
                     if (isScreenCacheEnabled) {
-                        saveToCache(quickPicksSource, it)
+                        mergedPage?.let { saveToCache(quickPicksSource, it) }
                     }
+                    relatedPageResult = Result.success(mergedPage)
                 }
-
-                relatedPageResult = finalResult
             }
         }
     }
 }
+
+// Tiny helper because coroutineScope + map + awaitAll isn't directly in stdlib here
+private suspend fun <T> List<kotlinx.coroutines.Deferred<T>>.awaitAll(): List<T> =
+    map { it.await() }
+

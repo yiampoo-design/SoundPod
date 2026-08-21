@@ -306,6 +306,20 @@ fun QuickPicks(
                             modifier = Modifier.padding(horizontal = 32.dp)
                         )
 
+                        // Show the actual underlying exception message so we can see what went wrong
+                        // (YouTube 403 / signature / PO token / network details).
+                        val debugMessage = currentError.message?.takeIf { it.isNotBlank() }
+                        if (debugMessage != null) {
+                            Spacer(modifier = Modifier.height(8.dp))
+                            Text(
+                                text = debugMessage,
+                                style = MaterialTheme.typography.bodySmall,
+                                textAlign = TextAlign.Center,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier.padding(horizontal = 24.dp)
+                            )
+                        }
+
                         Spacer(modifier = Modifier.height(24.dp))
 
                         Row(
