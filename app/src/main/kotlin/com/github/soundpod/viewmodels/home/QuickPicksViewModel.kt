@@ -98,38 +98,60 @@ class QuickPicksViewModel : ViewModel() {
         job?.cancel()
         job = viewModelScope.launch(Dispatchers.IO) {
             Log.d(TAG, "Loading Quick Picks (source=$quickPicksSource, force=$forceRefresh)")
-            val seedSongs = when (quickPicksSource) {
-                QuickPicksSource.Custom -> {
-                    val customGenre = appContext.preferences.getString(quickPicksCustomGenreKey, "ROCK") ?: "ROCK"
-                    val searchResult = Innertube.searchPage(
-                        query = customGenre,
-                        params = Innertube.SearchFilter.Song.value,
-                        fromMusicShelfRendererContent = Innertube.SongItem.Companion::from
-                    )?.getOrNull()
-
-                    searchResult?.items?.take(3)?.map { item ->
-                        val mediaItem = item.asMediaItem
-                        Song(
-                            id = mediaItem.mediaId,
-                            title = mediaItem.mediaMetadata.title.toString(),
-                            artistsText = mediaItem.mediaMetadata.artist.toString(),
-                            durationText = null,
-                            thumbnailUrl = mediaItem.mediaMetadata.artworkUri.toString()
-                        )
-                    } ?: emptyList()
+            coroutineScope {
+                val chartsDeferred = async {
+                    runCatching { Innertube.charts()?.getOrNull().orEmpty() }
+                        .onFailure { Log.w(TAG, "Innertube.charts failed: ${it.message}") }
+                        .getOrElse { emptyList() }
                 }
 
-                QuickPicksSource.Default -> {
-                    val seeds = mutableListOf<Song>()
+                val seedSongs = when (quickPicksSource) {
+                    QuickPicksSource.Custom -> {
+                        val customGenre = appContext.preferences.getString(quickPicksCustomGenreKey, "ROCK") ?: "ROCK"
+                        val searchResult = Innertube.searchPage(
+                            query = customGenre,
+                            params = Innertube.SearchFilter.Song.value,
+                            fromMusicShelfRendererContent = Innertube.SongItem.Companion::from
+                        )?.getOrNull()
 
-                    // 1. Add seeds from History
-                    seeds.addAll(db.history(limit = 2, minPlayTimeMs = MIN_HISTORY_PLAY_TIME_MS).first())
+                        searchResult?.items?.take(3)?.map { item ->
+                            val mediaItem = item.asMediaItem
+                            Song(
+                                id = mediaItem.mediaId,
+                                title = mediaItem.mediaMetadata.title.toString(),
+                                artistsText = mediaItem.mediaMetadata.artist.toString(),
+                                durationText = null,
+                                thumbnailUrl = mediaItem.mediaMetadata.artworkUri.toString()
+                            )
+                        } ?: emptyList()
+                    }
 
-                    // 2. Add seeds from Following
-                    val followed = db.followedArtists().first()
-                    if (followed.isNotEmpty()) {
-                        followed.shuffled().take(2).forEach { artist ->
-                            Innertube.artistPage(browseId = artist.id)?.getOrNull()?.songs?.firstOrNull()?.let { item ->
+                    QuickPicksSource.Default -> {
+                        val seeds = mutableListOf<Song>()
+
+                        seeds.addAll(db.history(limit = 2, minPlayTimeMs = MIN_HISTORY_PLAY_TIME_MS).first())
+
+                        val followed = db.followedArtists().first()
+                        if (followed.isNotEmpty()) {
+                            followed.shuffled().take(2).forEach { artist ->
+                                Innertube.artistPage(browseId = artist.id)?.getOrNull()?.songs?.firstOrNull()?.let { item ->
+                                    val mediaItem = item.asMediaItem
+                                    seeds.add(
+                                        Song(
+                                            id = mediaItem.mediaId,
+                                            title = mediaItem.mediaMetadata.title.toString(),
+                                            artistsText = mediaItem.mediaMetadata.artist.toString(),
+                                            durationText = null,
+                                            thumbnailUrl = mediaItem.mediaMetadata.artworkUri.toString()
+                                        )
+                                    )
+                                }
+                            }
+                        }
+
+                        if (seeds.size < 3) {
+                            val chartSongs = chartsDeferred.await()
+                            chartSongs.take(3 - seeds.size).forEach { item ->
                                 val mediaItem = item.asMediaItem
                                 seeds.add(
                                     Song(
@@ -142,37 +164,13 @@ class QuickPicksViewModel : ViewModel() {
                                 )
                             }
                         }
-                    }
 
-                    // 3. Add seeds from Charts if we don't have enough
-                    if (seeds.size < 3) {
-                        Innertube.charts()?.getOrNull()?.take(3 - seeds.size)?.forEach { item ->
-                            val mediaItem = item.asMediaItem
-                            seeds.add(
-                                Song(
-                                    id = mediaItem.mediaId,
-                                    title = mediaItem.mediaMetadata.title.toString(),
-                                    artistsText = mediaItem.mediaMetadata.artist.toString(),
-                                    durationText = null,
-                                    thumbnailUrl = mediaItem.mediaMetadata.artworkUri.toString()
-                                )
-                            )
+                        if (seeds.isEmpty()) {
+                            seeds.addAll(getSeedSongsFlow(quickPicksSource, 3).first())
                         }
-                    }
-                    
-                    if (seeds.isEmpty()) {
-                        seeds.addAll(getSeedSongsFlow(quickPicksSource, 3).first())
-                    }
-                    
-                    seeds.distinctBy { it.id }
-                }
-            }
 
-            coroutineScope {
-                val chartsDeferred = async {
-                    runCatching { Innertube.charts()?.getOrNull() }
-                        .onFailure { Log.w(TAG, "Innertube.charts failed: ${it.message}") }
-                        .getOrNull()
+                        seeds.distinctBy { it.id }
+                    }
                 }
 
                 val relatedDeferreds = seedSongs.map { song ->
