@@ -23,7 +23,7 @@ class WidgetUpdater(
 ) {
     fun updateWidget(player: Player, currentBitmap: Bitmap?) {
         val currentTitle = player.mediaMetadata.title?.toString() ?: "Not Playing"
-        val currentArtist = player.mediaMetadata.artist?.toString() ?: "SoundPod"
+        val currentArtist = player.mediaMetadata.artist?.toString() ?: "YiamTube"
         val isCurrentlyPlaying = player.shouldBePlaying
 
         coroutineScope.launch(Dispatchers.IO) {

@@ -16,7 +16,7 @@ kotlin {
 }
 
 extensions.configure<ApplicationExtension>("android") {
-    namespace = "com.yiam.yiamtube"
+    namespace = "com.github.soundpod"
     compileSdk = 37
 
     defaultConfig {

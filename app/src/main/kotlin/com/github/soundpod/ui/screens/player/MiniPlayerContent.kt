@@ -107,7 +107,7 @@ fun MiniPlayerContent(
             headlineContent = {
                 Box(modifier = Modifier.fillMaxWidth()) {
                     Text(
-                        text = nullableMediaItem?.mediaMetadata?.title?.toString() ?: "SoundPod",
+                        text = nullableMediaItem?.mediaMetadata?.title?.toString() ?: "YiamTube",
                         modifier = Modifier.basicMarquee(),
                         maxLines = 1,
                         overflow = TextOverflow.Clip,

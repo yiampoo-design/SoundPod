@@ -122,7 +122,7 @@ fun BackupSettingsContent() {
                     val formattedDate = LocalDateTime.now().format(formatter)
 
                     try {
-                        backupLauncher.launch("SoundPod_Manual_$formattedDate.db")
+                        backupLauncher.launch("YiamTube_Manual_$formattedDate.db")
                     } catch (_: ActivityNotFoundException) {
                         context.toast("Couldn't find an application to create documents")
                     }

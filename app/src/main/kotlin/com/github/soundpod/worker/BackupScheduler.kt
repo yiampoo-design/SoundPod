@@ -10,7 +10,7 @@ import java.util.concurrent.TimeUnit
 
 fun scheduleAutoBackup(context: Context, frequency: AutoBackUp) {
     val workManager = WorkManager.getInstance(context)
-    val workName = "SoundPodAutoBackup"
+    val workName = "YiamTubeAutoBackup"
 
     if (frequency == AutoBackUp.OFF) {
         workManager.cancelUniqueWork(workName)

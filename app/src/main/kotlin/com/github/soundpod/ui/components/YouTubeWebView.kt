@@ -42,7 +42,7 @@ fun YouTubeWebView() {
                 settings.userAgentString = "Mozilla/5.0 (Linux; Android 14; SM-S928B) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/133.0.0.0 Mobile Safari/537.36"
 
                 //Attach the explicitly defined bridge
-                addJavascriptInterface(SoundPodJsBridge(decipherRequests), "SoundPodBridge")
+                addJavascriptInterface(SoundPodJsBridge(decipherRequests), "YiamTubeBridge")
 
                 webViewClient = object : WebViewClient() {
                     override fun onPageFinished(view: WebView, url: String) {
@@ -64,7 +64,7 @@ fun YouTubeWebView() {
                             val cleanVisitorData = visitorData?.replace("\"", "")
 
                             if (!cleanVisitorData.isNullOrBlank() && cleanVisitorData != "null") {
-                                Log.d("SoundPod-WebView", "Extracted VisitorData: $cleanVisitorData")
+                                Log.d("YiamTube-WebView", "Extracted VisitorData: $cleanVisitorData")
 
                                 YouTubeSessionManager.updateSession(
                                     visitorData = cleanVisitorData,
@@ -95,13 +95,13 @@ fun YouTubeWebView() {
                         try {
                             view.evaluateJavascript(BotGuard.HTML, null)
                         } catch (e: Exception) {
-                            Log.e("SoundPod-WebView", "Failed to inject BotGuard script", e)
+                            Log.e("YiamTube-WebView", "Failed to inject BotGuard script", e)
                         }
 
                         // Try to find the decipher function
                         val searchDecipherJs = """
                             if (!window.decipherNParam) {
-                                console.log("SoundPod: Searching for decipher function...");
+                                console.log("YiamTube: Searching for decipher function...");
                             }
                         """.trimIndent()
                         view.evaluateJavascript(searchDecipherJs, null)
@@ -117,7 +117,7 @@ fun YouTubeWebView() {
             decipherRequests.values.forEach { it.cancel() }
             decipherRequests.clear()
 
-            webView.removeJavascriptInterface("SoundPodBridge")
+            webView.removeJavascriptInterface("YiamTubeBridge")
             webView.stopLoading()
             webView.destroy()
         }

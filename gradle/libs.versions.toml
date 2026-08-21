@@ -30,7 +30,7 @@ core-splashscreen = "1.2.0"
 material = "1.14.0"
 detekt = "1.23.8"
 work-runtime-ktx = "2.11.2"
-newpipe-extractor = "v0.26.3"
+newpipe-extractor = "v0.26.5"
 
 
 junit = "4.13.2"

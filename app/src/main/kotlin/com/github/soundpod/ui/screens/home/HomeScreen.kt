@@ -75,7 +75,7 @@ fun HomeScreen(
     StaticScreenLayout(
         title = {
             Text(
-                text = "SoundPod",
+                text = "YiamTube",
                 fontSize = 20.sp,
                 fontWeight = FontWeight.SemiBold,
                 color = colorPalette.text

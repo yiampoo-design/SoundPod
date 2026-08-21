@@ -28,7 +28,7 @@ class AutoBackupWorker(
         return try {
             val formatter = DateTimeFormatter.ofPattern("yyyyMMdd_HHmmss", Locale.US)
             val dateString = LocalDateTime.now().format(formatter)
-            val fileName = "SoundPod_Auto_$dateString.db"
+            val fileName = "YiamTube_Auto_$dateString.db"
 
             val pickedDir = DocumentFile.fromTreeUri(context, treeUri)
             val newFile = pickedDir?.createFile("application/vnd.sqlite3", fileName)
@@ -44,7 +44,7 @@ class AutoBackupWorker(
             }
 
             pickedDir.listFiles()
-                .filter { it.name?.startsWith("SoundPod_Auto_") == true }
+                .filter { it.name?.startsWith("YiamTube_Auto_") == true }
                 .sortedByDescending { it.name }
                 .drop(5)
                 .forEach { oldFile ->

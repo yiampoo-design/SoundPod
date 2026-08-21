@@ -60,7 +60,7 @@ class PlayerMediaSourceProvider(
 
         val resolvingUpstreamFactory = ResolvingDataSource.Factory(upstreamFactory) { dataSpec ->
             val videoId = dataSpec.key ?: throw java.io.IOException("A key must be set")
-            Log.d("SoundPod-DataSource", "Resolving URI for key: $videoId")
+            Log.d("YiamTube-DataSource", "Resolving URI for key: $videoId")
             if (videoId.startsWith("http") || videoId.startsWith("content://") || videoId.startsWith("file://")) {
                 dataSpec
             } else {
@@ -95,7 +95,7 @@ class PlayerMediaSourceProvider(
 
         urlCache[videoId]?.let { (uri, timestamp) ->
             if (System.currentTimeMillis() - timestamp < CACHE_EXPIRATION_MS) {
-                Log.d("SoundPod-DataSource", "URL cache hit for $videoId")
+                Log.d("YiamTube-DataSource", "URL cache hit for $videoId")
                 return uri
             }
         }
@@ -136,7 +136,7 @@ class PlayerMediaSourceProvider(
 
                 bestAudio.content
             }.getOrElse { e ->
-                Log.e("SoundPod-Debug", "NewPipe resolution failed for $videoId", e)
+                Log.e("YiamTube-Debug", "NewPipe resolution failed for $videoId", e)
                 throw e
             }
 
@@ -158,7 +158,7 @@ private class YouTube403ErrorPolicy(
 
         if (exception is HttpDataSource.InvalidResponseCodeException && exception.responseCode == 403) {
             val videoId = loadErrorInfo.loadEventInfo.dataSpec.key
-            Log.w("SoundPod-Debug", "Hit a 403 Forbidden for $videoId! Evicting URL cache and retrying...")
+            Log.w("YiamTube-Debug", "Hit a 403 Forbidden for $videoId! Evicting URL cache and retrying...")
 
             if (videoId != null) {
                 urlCache.remove(videoId)

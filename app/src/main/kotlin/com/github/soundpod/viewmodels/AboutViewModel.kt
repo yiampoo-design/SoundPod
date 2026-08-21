@@ -185,7 +185,7 @@ class AboutViewModel(application: Application) : AndroidViewModel(application) {
             try {
                 FileOutputStream(reportFile).use { output ->
                     val sdf = SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.US)
-                    output.write("SoundPod Bug Report\n".toByteArray())
+                    output.write("YiamTube Bug Report\n".toByteArray())
                     output.write("===================\n".toByteArray())
                     output.write("Report Generated: ${sdf.format(Date())}\n".toByteArray())
                     output.write("Session Started: ${sdf.format(Date(recordingStartTime))}\n".toByteArray())
@@ -224,7 +224,7 @@ class AboutViewModel(application: Application) : AndroidViewModel(application) {
                 val uri = FileProvider.getUriForFile(context, "${context.packageName}.provider", reportFile)
                 val intent = Intent(Intent.ACTION_SEND).apply {
                     type = "text/plain"
-                    putExtra(Intent.EXTRA_SUBJECT, "SoundPod Bug Report ${SimpleDateFormat("yyyyMMdd_HHmm", Locale.US).format(Date())}")
+                    putExtra(Intent.EXTRA_SUBJECT, "YiamTube Bug Report ${SimpleDateFormat("yyyyMMdd_HHmm", Locale.US).format(Date())}")
                     putExtra(Intent.EXTRA_STREAM, uri)
                     addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
                 }
@@ -247,7 +247,7 @@ class AboutViewModel(application: Application) : AndroidViewModel(application) {
         try {
             val resolver = context.contentResolver
             val contentValues = ContentValues().apply {
-                put(MediaStore.MediaColumns.DISPLAY_NAME, "SoundPod_BugReport_${System.currentTimeMillis()}.txt")
+                put(MediaStore.MediaColumns.DISPLAY_NAME, "YiamTube_BugReport_${System.currentTimeMillis()}.txt")
                 put(MediaStore.MediaColumns.MIME_TYPE, "text/plain")
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
                     put(MediaStore.MediaColumns.RELATIVE_PATH, "Download/SoundPod")

@@ -19,11 +19,11 @@ import java.net.URL
 fun downloadApk(context: Context, url: String): Long {
     val request = DownloadManager.Request(url.toUri())
         .setTitle("Downloading Update")
-        .setDescription("Downloading latest SoundPod APK…")
+        .setDescription("Downloading latest YiamTube APK…")
         .setNotificationVisibility(DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED)
         .setDestinationInExternalPublicDir(
             Environment.DIRECTORY_DOWNLOADS,
-            "SoundPod-latest.apk"
+            "YiamTube-latest.apk"
         )
 
     val manager = context.getSystemService(DownloadManager::class.java)
@@ -44,7 +44,7 @@ suspend fun checkForUpdates(
         if (latestVersion != null && apkAsset != null) {
             val isNew = VersionUtils.isNewerVersion(latestVersion, currentVersion)
             if (isNew) {
-                val fileName = "SoundPod_v$latestVersion.apk"
+                val fileName = "YiamTube_v$latestVersion.apk"
                 val existingFile = if (isSeamless) {
                     File(context.externalCacheDir, "update.apk") // Keep internal generic for simplicity
                 } else {
@@ -116,12 +116,12 @@ suspend fun downloadViaDownloadManager(
 ) {
     try {
         val request = DownloadManager.Request(urlString.toUri())
-            .setTitle("SoundPod Update")
+            .setTitle("YiamTube Update")
             .setDescription("Downloading latest version...")
             .setNotificationVisibility(DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED)
             .setDestinationInExternalPublicDir(
                 Environment.DIRECTORY_DOWNLOADS,
-                "SoundPod-Update.apk"
+                "YiamTube-Update.apk"
             )
             .setAllowedOverMetered(true)
             .setAllowedOverRoaming(true)
@@ -149,7 +149,7 @@ suspend fun downloadViaDownloadManager(
                     downloading = false
                     val publicFile = File(
                         Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS),
-                        "SoundPod-Update.apk"
+                        "YiamTube-Update.apk"
                     )
                     onFinished(publicFile)
                 } else if (status == DownloadManager.STATUS_FAILED) {
@@ -195,7 +195,7 @@ fun openPublicFile(context: Context, file: File) {
             }
             context.startActivity(intent)
         } catch (_: Exception) {
-            Toast.makeText(context, "Saved to Downloads: SoundPod-Update.apk", Toast.LENGTH_LONG)
+            Toast.makeText(context, "Saved to Downloads: YiamTube-Update.apk", Toast.LENGTH_LONG)
                 .show()
         }
     }

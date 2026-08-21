@@ -177,7 +177,7 @@ fun MoreSettingsContent() {
                                 Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS)
                             )
                         } catch (_: ActivityNotFoundException) {
-                            context.toast("Couldn't find battery optimization settings, please whitelist SoundPod manually")
+                            context.toast("Couldn't find battery optimization settings, please whitelist YiamTube manually")
                         }
                     }
                 },

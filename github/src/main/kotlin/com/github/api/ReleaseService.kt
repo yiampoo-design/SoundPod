@@ -11,7 +11,7 @@ class ReleaseService(
     suspend fun getReleases(): List<Release> {
         return try {
             val response =
-                client.get("https://api.github.com/repos/arunnechully/SoundPod/releases") {
+                client.get("https://api.github.com/repos/yiampoo-design/YiamTube/releases") {
                     header("X-GitHub-Api-Version", "2022-11-28")
                 }
             response.body()

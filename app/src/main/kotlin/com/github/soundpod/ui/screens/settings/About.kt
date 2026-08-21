@@ -132,12 +132,12 @@ fun AboutSettingsContent(
             SettingRow(
                 icon = IconSource.Icon(painterResource(id = R.drawable.github)),
                 title = stringResource(id = R.string.source_code),
-                onClick = { uriHandler.openUri("https://github.com/arunnechully/SoundPod") },
+                onClick = { uriHandler.openUri("https://github.com/yiampoo-design/YiamTube") },
             )
             SettingRow(
                 icon = IconSource.Icon(painterResource(id = R.drawable.idea)),
                 title = stringResource(id = R.string.suggest_an_idea),
-                onClick = { uriHandler.openUri("https://github.com/arunnechully/SoundPod/issues/new") },
+                onClick = { uriHandler.openUri("https://github.com/yiampoo-design/YiamTube/issues/new") },
             )
             val isRecording by viewModel.isRecordingLogs.collectAsState()
             SettingRow(

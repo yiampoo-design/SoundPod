@@ -351,7 +351,7 @@ class PlayerService : InvincibleService(), Player.Listener,
         }
 
         if (videoIdsToPrefetch.isNotEmpty()) {
-            Log.d("SoundPod-Prefetch", "Triggering prefetch for: $videoIdsToPrefetch")
+            Log.d("YiamTube-Prefetch", "Triggering prefetch for: $videoIdsToPrefetch")
             preCacheManager.preCache(videoIdsToPrefetch)
 
             // Also pre-fetch lyrics and artwork for the very next track

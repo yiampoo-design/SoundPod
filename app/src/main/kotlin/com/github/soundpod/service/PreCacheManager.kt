@@ -53,15 +53,15 @@ class PreCacheManager(
 
     private suspend fun preCacheSong(videoId: String) {
         if (cacheManager.isCached(videoId, 0, 128 * 1024L)) {
-            Log.i("SoundPod-PreCache", "$videoId is already in cache, skipping.")
+            Log.i("YiamTube-PreCache", "$videoId is already in cache, skipping.")
             return
         }
 
-        Log.d("SoundPod-PreCache", "Pre-caching $videoId...")
+        Log.d("YiamTube-PreCache", "Pre-caching $videoId...")
 
         val response = Innertube.player(videoId)?.getOrNull()
         if (response == null) {
-            Log.e("SoundPod-PreCache", "Failed to get metadata for $videoId")
+            Log.e("YiamTube-PreCache", "Failed to get metadata for $videoId")
             return
         }
 
@@ -74,13 +74,13 @@ class PreCacheManager(
             mediaSourceProvider.injectUrl(videoId, initialUri)
             initialUri
         } else {
-            Log.w("SoundPod-PreCache", "No direct URL found for $videoId, waiting for resolver...")
+            Log.w("YiamTube-PreCache", "No direct URL found for $videoId, waiting for resolver...")
             val resolvedUri = runCatching { mediaSourceProvider.resolveUrl(videoId) }.getOrNull()
 
             if (resolvedUri != null) {
                 resolvedUri
             } else {
-                Log.e("SoundPod-PreCache", "Totally failed to resolve direct URL for $videoId")
+                Log.e("YiamTube-PreCache", "Totally failed to resolve direct URL for $videoId")
                 return
             }
         }
@@ -103,9 +103,9 @@ class PreCacheManager(
         try {
             CacheWriter(cacheDataSource, dataSpec, null, null).cache()
             db.insert(PrecachedSong(videoId))
-            Log.i("SoundPod-PreCache", "Successfully buffered 128kb for $videoId")
+            Log.i("YiamTube-PreCache", "Successfully buffered 128kb for $videoId")
         } catch (e: Exception) {
-            Log.e("SoundPod-PreCache", "Caching failed for $videoId: ${e.message}")
+            Log.e("YiamTube-PreCache", "Caching failed for $videoId: ${e.message}")
         }
     }
 
@@ -117,7 +117,7 @@ class PreCacheManager(
             oldSongs.forEach { song ->
                 cacheManager.removeCache(song.id)
                 db.deletePrecachedSong(song.id)
-                Log.d("SoundPod-PreCache", "Cleaned up expired pre-cache for ${song.id}")
+                Log.d("YiamTube-PreCache", "Cleaned up expired pre-cache for ${song.id}")
             }
         }
     }
