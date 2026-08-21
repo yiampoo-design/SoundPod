@@ -53,7 +53,8 @@ data class MusicResponsiveListItemRenderer(
 
     val videoId: String?
         get() =
-            playlistItemData?.videoId
+            navigationEndpoint?.watchEndpoint?.videoId
+                ?: playlistItemData?.videoId
                 ?: flexColumns
                     .firstOrNull()
                     ?.musicResponsiveListItemFlexColumnRenderer
