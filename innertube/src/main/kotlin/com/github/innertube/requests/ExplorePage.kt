@@ -10,6 +10,8 @@ import com.github.innertube.Innertube
 import com.github.innertube.Innertube.applyYouTubeMusicClient
 import com.github.innertube.models.BrowseResponse
 import com.github.innertube.models.MusicCarouselShelfRenderer
+import com.github.innertube.models.MusicResponsiveListItemRenderer
+import com.github.innertube.models.NavigationEndpoint
 import com.github.innertube.models.YouTubeClient
 import com.github.innertube.models.bodies.BrowseBody
 import com.github.innertube.utils.findSectionByTitle
@@ -40,20 +42,6 @@ suspend fun Innertube.charts(): Result<List<Innertube.SongItem>?>? = runCatching
     val visitorDataPresent = !visitorData.isNullOrBlank()
     val browseId = "FEmusic_charts"
     val params = CHARTS_PARAMS
-    val bodyBytes = try {
-        kotlinx.serialization.json.Json.encodeToString(
-            com.github.innertube.models.bodies.BrowseBody.serializer(),
-            BrowseBody(
-                browseId = browseId,
-                params = params,
-                context = ytClient.toContext(
-                    hl = "en",
-                    gl = gl,
-                    visitorData = visitorData,
-                )
-            )
-        ).length
-    } catch (_: Exception) { 0 }
 
     httpLogger.fine("charts http-start client=WEB_REMIX clientId=${ytClient.clientId} version=${ytClient.clientVersion} visitorDataPresent=$visitorDataPresent browseId=$browseId gl=$gl hl=en")
 
@@ -130,16 +118,36 @@ suspend fun Innertube.charts(): Result<List<Innertube.SongItem>?>? = runCatching
         }
     }
 
-    // TASK 3 – parse all music carousel song items structurally, no title dependency
-    var songs: List<Innertube.SongItem> = sections
+    // Collect responsive renderers structurally (no title dependency)
+    val responsiveRenderers: List<MusicResponsiveListItemRenderer> = sections
         .mapNotNull { it.musicCarouselShelfRenderer }
         .flatMap { it.contents.orEmpty() }
         .mapNotNull { it.musicResponsiveListItemRenderer }
-        .mapNotNull(Innertube.SongItem::from)
+
+    innertubeLogger.info("charts responsiveItems=${responsiveRenderers.size}")
+
+    // TASK 3 – temporary diagnostics for first 2 items: which videoId source is present
+    responsiveRenderers.take(2).forEachIndexed { idx, renderer ->
+        val playlistVid = renderer.playlistItemData?.videoId
+        val titleRunVid = renderer.flexColumns.firstOrNull()?.musicResponsiveListItemFlexColumnRenderer?.text?.runs?.firstOrNull()?.navigationEndpoint?.watchEndpoint?.videoId
+        val overlayVid = renderer.overlay?.musicItemThumbnailOverlayRenderer?.content?.musicPlayButtonRenderer?.playNavigationEndpoint?.watchEndpoint?.videoId
+        val resolved = renderer.videoId
+        val titleText = renderer.flexColumns.getOrNull(0)?.musicResponsiveListItemFlexColumnRenderer?.text?.runs?.firstOrNull()?.text ?: ""
+        innertubeLogger.info("charts item[$idx] playlistVideoId=${playlistVid != null} titleRunVideoId=${titleRunVid != null} overlayVideoId=${overlayVid != null} resolvedVideoId=${resolved != null} title=\"$titleText\"")
+    }
+
+    val withVideoId = responsiveRenderers.count { it.videoId != null }
+    innertubeLogger.info("charts responsiveWithVideoId=$withVideoId")
+
+    // TASK 4/5 – chart-specific converter (does not modify global SongItem::from)
+    var songs: List<Innertube.SongItem> = responsiveRenderers
+        .mapNotNull { it.toChartSongItem() }
         .filter { it.key.isNotBlank() }
         .distinctBy { it.key }
 
-    // TASK 6 – fallback: if responsive=0 but twoRow>0, try converting twoRow items as songs
+    innertubeLogger.info("charts convertedSongs=${songs.size}")
+
+    // Fallback for twoRow/grid only if responsive still empty (keep previous behavior for coverage)
     if (songs.isEmpty()) {
         val twoRowCandidates = sections
             .mapNotNull { it.musicCarouselShelfRenderer }
@@ -150,11 +158,11 @@ suspend fun Innertube.charts(): Result<List<Innertube.SongItem>?>? = runCatching
                 val videoId = renderer.navigationEndpoint?.watchEndpoint?.videoId ?: return@mapNotNull null
                 if (videoId.isBlank()) return@mapNotNull null
                 try {
-                    val info = renderer.title?.runs?.firstOrNull()?.let { Innertube.Info<com.github.innertube.models.NavigationEndpoint.Endpoint.Watch>(it) }
+                    val info = renderer.title?.runs?.firstOrNull()?.let { Innertube.Info<NavigationEndpoint.Endpoint.Watch>(it) }
                     val authors = renderer.subtitle?.runs
                         ?.mapNotNull { run ->
                             if (run.navigationEndpoint?.browseEndpoint != null) {
-                                Innertube.Info<com.github.innertube.models.NavigationEndpoint.Endpoint.Browse>(run)
+                                Innertube.Info<NavigationEndpoint.Endpoint.Browse>(run)
                             } else null
                         }?.takeIf { it.isNotEmpty() }
                     Innertube.SongItem(
@@ -173,7 +181,6 @@ suspend fun Innertube.charts(): Result<List<Innertube.SongItem>?>? = runCatching
         }
     }
 
-    // Also consider gridRenderer items as potential songs
     if (songs.isEmpty()) {
         val gridTwoRowSongs = sections
             .mapNotNull { it.gridRenderer }
@@ -183,7 +190,7 @@ suspend fun Innertube.charts(): Result<List<Innertube.SongItem>?>? = runCatching
                 val videoId = renderer.navigationEndpoint?.watchEndpoint?.videoId ?: return@mapNotNull null
                 if (videoId.isBlank()) return@mapNotNull null
                 try {
-                    val info = renderer.title?.runs?.firstOrNull()?.let { Innertube.Info<com.github.innertube.models.NavigationEndpoint.Endpoint.Watch>(it) }
+                    val info = renderer.title?.runs?.firstOrNull()?.let { Innertube.Info<NavigationEndpoint.Endpoint.Watch>(it) }
                     Innertube.SongItem(
                         info = info,
                         authors = null,
@@ -199,7 +206,7 @@ suspend fun Innertube.charts(): Result<List<Innertube.SongItem>?>? = runCatching
         }
     }
 
-    // TASK 5 – final parser counts
+    // TASK 5/6 – final parser counts
     innertubeLogger.info("charts parsed sections=${sections.size} songs=${songs.size}")
     innertubeLogger.info("charts status=$status bytes=$rawBytes")
 
@@ -210,6 +217,86 @@ suspend fun Innertube.charts(): Result<List<Innertube.SongItem>?>? = runCatching
         innertubeLogger.info("charts parse-ok client=WEB_REMIX visitorDataPresent=$visitorDataPresent status=$status bytes=$rawBytes items=${songs.size}")
     }
     songs
+}
+
+/**
+ * Chart-specific SongItem converter that recovers videoId from alternate fields
+ * (playlistItemData, overlay) and constructs endpoint manually.
+ */
+private fun MusicResponsiveListItemRenderer.toChartSongItem(): Innertube.SongItem? {
+    val resolvedVideoId = videoId ?: return null
+
+    val titleRun = flexColumns
+        .getOrNull(0)
+        ?.musicResponsiveListItemFlexColumnRenderer
+        ?.text
+        ?.runs
+        ?.firstOrNull()
+        ?: return null
+
+    val title = titleRun.text ?: return null
+    if (title.isBlank()) return null
+
+    val info = Innertube.Info(
+        name = title,
+        endpoint = NavigationEndpoint.Endpoint.Watch(
+            videoId = resolvedVideoId
+        )
+    )
+
+    val authors = flexColumns
+        .getOrNull(1)
+        ?.musicResponsiveListItemFlexColumnRenderer
+        ?.text
+        ?.runs
+        ?.mapNotNull { run ->
+            run.navigationEndpoint
+                ?.browseEndpoint
+                ?.let {
+                    Innertube.Info<NavigationEndpoint.Endpoint.Browse>(
+                        name = run.text,
+                        endpoint = it
+                    )
+                }
+        }
+        ?.takeIf { it.isNotEmpty() }
+
+    val albumEndpoint = flexColumns
+        .getOrNull(2)
+        ?.musicResponsiveListItemFlexColumnRenderer
+        ?.text
+        ?.runs
+        ?.firstOrNull()
+        ?.navigationEndpoint
+        ?.browseEndpoint
+
+    val album = albumEndpoint?.let { endpoint ->
+        val albumName = flexColumns
+            .getOrNull(2)
+            ?.musicResponsiveListItemFlexColumnRenderer
+            ?.text
+            ?.runs
+            ?.firstOrNull()
+            ?.text ?: ""
+        Innertube.Info(
+            name = albumName,
+            endpoint = endpoint
+        )
+    }
+
+    val thumbnail = thumbnail
+        ?.musicThumbnailRenderer
+        ?.thumbnail
+        ?.thumbnails
+        ?.lastOrNull()
+
+    return Innertube.SongItem(
+        info = info,
+        authors = authors,
+        album = album,
+        durationText = null,
+        thumbnail = thumbnail
+    ).takeIf { it.key.isNotBlank() }
 }
 
 /**
