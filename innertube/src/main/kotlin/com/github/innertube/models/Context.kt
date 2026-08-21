@@ -17,11 +17,12 @@ data class Context(
         val userAgent: String,
         val gl: String? = null,
         val hl: String? = null,
-        val visitorData: String? = null,
-        // YouTube's signature timestamp — required by WEB_REMIX and TVHTML5 clients
-        // to prove the request originates from a real browser. Without this, YouTube
-        // returns 403 Forbidden or removes streamingData from the response.
-        val signatureTimestamp: Long? = null
+        val visitorData: String? = null
+        // signatureTimestamp was removed: hardcoding it caused YouTube to
+        // return 400 "Request contains an invalid argument" once YouTube
+        // rotated the timestamp value. The proper place to set it is inside
+        // the player response post-processing (decipher), not the request
+        // body for browse/search.
     )
 
     @Serializable

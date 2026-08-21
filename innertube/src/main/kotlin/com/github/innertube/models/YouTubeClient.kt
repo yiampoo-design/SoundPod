@@ -141,17 +141,21 @@ enum class YouTubeClient(
             userAgent = userAgent,
             gl = gl ?: if (localized) Locale.getDefault().country.takeIf { it.length == 2 } ?: "US" else "US",
             hl = hl ?: if (localized) Locale.getDefault().language.ifBlank { "en" } else "en",
-            visitorData = visitorData ?: "",
-            // YouTube's anti-bot check verifies this timestamp. Must be a value
-            // that YouTube has publicly signed — 20039 is the well-known
-            // value used by all open-source YouTube clients.
-            signatureTimestamp = if (useSignatureTimestamp) SIGNATURE_TIMESTAMP else null
+            visitorData = visitorData ?: ""
+            // signatureTimestamp intentionally NOT set in the request body.
+            // Adding it caused 400 "Request contains an invalid argument" once
+            // YouTube rotated the timestamp value. The proper way to obtain
+            // it is from base.js at runtime; until that is wired in, do NOT
+            // include it in the request.
         )
     )
 
     companion object {
-        // YouTube's known signature timestamp — must be a value YouTube has signed.
-        // This is the standard value used by all open-source YouTube clients.
+        // YouTube rotates signature timestamp periodically. A hardcoded value
+        // (e.g. 20039) becomes invalid after a YouTube update and triggers
+        // 400 responses. The proper way to obtain it is from base.js at
+        // runtime; until that is wired in, do NOT include it in the request.
+        @Suppress("unused")
         const val SIGNATURE_TIMESTAMP: Long = 20039
     }
 }
