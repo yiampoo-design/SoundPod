@@ -99,23 +99,117 @@ suspend fun Innertube.charts(): Result<List<Innertube.SongItem>?>? = runCatching
         return@runCatchingNonCancellable null
     }
 
-    val sectionListRenderer = body.contents?.sectionListRenderer
-    val items = (sectionListRenderer?.findSectionByTitle("Top songs")
-        ?: sectionListRenderer?.findSectionByTitle("Top music videos")
-        ?: sectionListRenderer?.findSectionByTitle("Trending")
-        ?: sectionListRenderer?.contents?.firstOrNull { it.musicCarouselShelfRenderer != null })
-        ?.musicCarouselShelfRenderer
-        ?.contents
-        ?.mapNotNull(MusicCarouselShelfRenderer.Content::musicResponsiveListItemRenderer)
-        ?.mapNotNull(Innertube.SongItem::from)
-        ?.takeIf { it.isNotEmpty() }
+    // TASK 1 – read from current response path: contents -> singleColumnBrowseResultsRenderer -> tabs[0] -> tabRenderer -> content -> sectionListRenderer
+    val sectionListRenderer = body.contents
+        ?.singleColumnBrowseResultsRenderer
+        ?.tabs
+        ?.firstOrNull()
+        ?.tabRenderer
+        ?.content
+        ?.sectionListRenderer
+        ?: body.contents?.sectionListRenderer
 
-    if (items == null) {
-        innertubeLogger.warning("charts parse-ok-but-empty client=WEB_REMIX visitorDataPresent=$visitorDataPresent status=$status bytes=$rawBytes")
-    } else {
-        innertubeLogger.fine("charts parse-ok client=WEB_REMIX visitorDataPresent=$visitorDataPresent status=$status bytes=$rawBytes items=${items.size}")
+    val sections = sectionListRenderer?.contents.orEmpty()
+
+    // TASK 4 – diagnostics per section
+    sections.forEachIndexed { index, content ->
+        val isCarousel = content.musicCarouselShelfRenderer != null
+        val isGrid = content.gridRenderer != null
+        val isShelf = content.musicShelfRenderer != null
+        innertubeLogger.info("charts section[$index] carousel=$isCarousel grid=$isGrid shelf=$isShelf")
+        if (isCarousel) {
+            val carousel = content.musicCarouselShelfRenderer
+            val itemCount = carousel?.contents?.size ?: 0
+            val responsive = carousel?.contents?.count { it.musicResponsiveListItemRenderer != null } ?: 0
+            val twoRow = carousel?.contents?.count { it.musicTwoRowItemRenderer != null } ?: 0
+            innertubeLogger.info("charts carousel[$index] items=$itemCount responsive=$responsive twoRow=$twoRow")
+        }
+        if (isGrid) {
+            val itemCount = content.gridRenderer?.items?.size ?: 0
+            innertubeLogger.info("charts grid[$index] items=$itemCount")
+        }
     }
-    items
+
+    // TASK 3 – parse all music carousel song items structurally, no title dependency
+    var songs: List<Innertube.SongItem> = sections
+        .mapNotNull { it.musicCarouselShelfRenderer }
+        .flatMap { it.contents.orEmpty() }
+        .mapNotNull { it.musicResponsiveListItemRenderer }
+        .mapNotNull(Innertube.SongItem::from)
+        .filter { it.key.isNotBlank() }
+        .distinctBy { it.key }
+
+    // TASK 6 – fallback: if responsive=0 but twoRow>0, try converting twoRow items as songs
+    if (songs.isEmpty()) {
+        val twoRowCandidates = sections
+            .mapNotNull { it.musicCarouselShelfRenderer }
+            .flatMap { it.contents.orEmpty() }
+            .mapNotNull { it.musicTwoRowItemRenderer }
+        if (twoRowCandidates.isNotEmpty()) {
+            val twoRowSongs = twoRowCandidates.mapNotNull { renderer ->
+                val videoId = renderer.navigationEndpoint?.watchEndpoint?.videoId ?: return@mapNotNull null
+                if (videoId.isBlank()) return@mapNotNull null
+                try {
+                    val info = renderer.title?.runs?.firstOrNull()?.let { Innertube.Info<com.github.innertube.models.NavigationEndpoint.Endpoint.Watch>(it) }
+                    val authors = renderer.subtitle?.runs
+                        ?.mapNotNull { run ->
+                            if (run.navigationEndpoint?.browseEndpoint != null) {
+                                Innertube.Info<com.github.innertube.models.NavigationEndpoint.Endpoint.Browse>(run)
+                            } else null
+                        }?.takeIf { it.isNotEmpty() }
+                    Innertube.SongItem(
+                        info = info,
+                        authors = authors,
+                        album = null,
+                        durationText = null,
+                        thumbnail = renderer.thumbnailRenderer?.musicThumbnailRenderer?.thumbnail?.thumbnails?.lastOrNull()
+                    ).takeIf { it.key.isNotBlank() }
+                } catch (_: Exception) { null }
+            }.filter { it.key.isNotBlank() }.distinctBy { it.key }
+            if (twoRowSongs.isNotEmpty()) {
+                innertubeLogger.info("charts twoRow fallback parsed songs=${twoRowSongs.size}")
+                songs = twoRowSongs
+            }
+        }
+    }
+
+    // Also consider gridRenderer items as potential songs
+    if (songs.isEmpty()) {
+        val gridTwoRowSongs = sections
+            .mapNotNull { it.gridRenderer }
+            .flatMap { it.items.orEmpty() }
+            .mapNotNull { it.musicTwoRowItemRenderer }
+            .mapNotNull { renderer ->
+                val videoId = renderer.navigationEndpoint?.watchEndpoint?.videoId ?: return@mapNotNull null
+                if (videoId.isBlank()) return@mapNotNull null
+                try {
+                    val info = renderer.title?.runs?.firstOrNull()?.let { Innertube.Info<com.github.innertube.models.NavigationEndpoint.Endpoint.Watch>(it) }
+                    Innertube.SongItem(
+                        info = info,
+                        authors = null,
+                        album = null,
+                        durationText = null,
+                        thumbnail = renderer.thumbnailRenderer?.musicThumbnailRenderer?.thumbnail?.thumbnails?.lastOrNull()
+                    ).takeIf { it.key.isNotBlank() }
+                } catch (_: Exception) { null }
+            }.filter { it.key.isNotBlank() }.distinctBy { it.key }
+        if (gridTwoRowSongs.isNotEmpty()) {
+            innertubeLogger.info("charts grid fallback parsed songs=${gridTwoRowSongs.size}")
+            songs = gridTwoRowSongs
+        }
+    }
+
+    // TASK 5 – final parser counts
+    innertubeLogger.info("charts parsed sections=${sections.size} songs=${songs.size}")
+    innertubeLogger.info("charts status=$status bytes=$rawBytes")
+
+    if (songs.isEmpty()) {
+        innertubeLogger.warning("charts parse-ok-but-empty client=WEB_REMIX visitorDataPresent=$visitorDataPresent status=$status bytes=$rawBytes")
+        return@runCatchingNonCancellable emptyList()
+    } else {
+        innertubeLogger.info("charts parse-ok client=WEB_REMIX visitorDataPresent=$visitorDataPresent status=$status bytes=$rawBytes items=${songs.size}")
+    }
+    songs
 }
 
 /**
