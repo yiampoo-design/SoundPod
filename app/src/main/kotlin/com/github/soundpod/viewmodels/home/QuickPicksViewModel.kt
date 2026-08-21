@@ -186,6 +186,8 @@ class QuickPicksViewModel : ViewModel() {
                 val relatedResults = relatedDeferreds.mapNotNull { it.await() }
                 Log.d(TAG, "Related-page results: ${relatedResults.size}/${seedSongs.size} succeeded")
 
+                Log.i(TAG, "Quick Picks seedSongs=${seedSongs.size}")
+
                 var mergedPage = if (relatedResults.isNotEmpty()) {
                     Innertube.RelatedPage(
                         songs = interleave(relatedResults.map { it.songs ?: emptyList() }).take(40),
@@ -195,23 +197,26 @@ class QuickPicksViewModel : ViewModel() {
                     )
                 } else null
 
+                // Direct chart songs fallback when recommendations are empty
                 if (mergedPage == null || mergedPage.songs.isNullOrEmpty()) {
-                    chartsDeferred.await()?.shuffled()?.take(2)?.forEach { fallbackSong ->
-                        val fallbackResult = Innertube.relatedPage(videoId = fallbackSong.key)?.getOrNull()
-                        if (fallbackResult != null && !fallbackResult.songs.isNullOrEmpty()) {
-                            mergedPage = fallbackResult
-                            return@forEach
-                        }
+                    val chartSongs = chartsDeferred.await().orEmpty()
+                    if (chartSongs.isNotEmpty()) {
+                        Log.i(TAG, "Using ${chartSongs.size} chart songs directly as Quick Picks fallback")
+                        mergedPage = Innertube.RelatedPage(
+                            songs = chartSongs.take(40),
+                            playlists = emptyList(),
+                            albums = emptyList(),
+                            artists = emptyList()
+                        )
                     }
                 }
 
-                if (mergedPage == null || mergedPage.songs.isNullOrEmpty()) {
-                    val globalFallbacks = listOf("fJ9rUzIMcZQ", "kJQP7kiw5Fk", "JGwWNGJdvx8")
-                    mergedPage = Innertube.relatedPage(videoId = globalFallbacks.random())?.getOrNull()
+                val finalResult = if (mergedPage != null && !mergedPage.songs.isNullOrEmpty()) {
+                    Result.success(mergedPage)
+                } else {
+                    Result.failure(Exception("Failed to load Quick Picks"))
                 }
-
-                val finalResult = mergedPage?.let { Result.success(it) } 
-                    ?: Result.failure(Exception("Failed to load Quick Picks"))
+                Log.i(TAG, "Quick Picks final songs=${finalResult.getOrNull()?.songs?.size ?: 0}")
 
                 finalResult.getOrNull()?.let {
                     if (isScreenCacheEnabled) {
