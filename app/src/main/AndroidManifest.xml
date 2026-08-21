@@ -38,7 +38,7 @@
         android:localeConfig="@xml/locales_config"
         android:roundIcon="@mipmap/ic_launcher_round"
         android:supportsRtl="true"
-        android:theme="@style/Theme.SoundPod"
+        android:theme="@style/Theme.YiamTube"
         tools:targetApi="37">
 
         <activity
@@ -104,7 +104,7 @@
             android:name=".SettingsActivity"
             android:exported="false"
             android:label="@string/settings"
-            android:theme="@style/Theme.SoundPod.Settings" />
+            android:theme="@style/Theme.YiamTube.Settings" />
 
         <service
             android:name=".service.PlayerService"

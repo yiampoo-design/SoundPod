@@ -244,7 +244,7 @@
     <string name="seamless_update">Actualización sin interrupciones</string>
     <string name="seamless_update_description">Instalar actualizaciones directamente desde la app</string>
     <string name="enable_seamless_update">​¿Activar actualizaciones sin interrupciones?</string>
-    <string name="enable_seamless_update_description">Para instalar actualizaciones internamente, SoundPod necesita permiso para instalar aplicaciones desconocidas. De lo contrario, las actualizaciones se guardarán en la carpeta Descargas.</string>
+    <string name="enable_seamless_update_description">Para instalar actualizaciones internamente, YiamTube necesita permiso para instalar aplicaciones desconocidas. De lo contrario, las actualizaciones se guardarán en la carpeta Descargas.</string>
     <string name="permissions">Permisos</string>
     <string name="notifications">Notificaciones</string>
     <string name="update_now">Actualizar ahora</string>
@@ -285,7 +285,7 @@
     <string name="updates_handled_by_fdroid">Las actualizaciones para esta versión se gestionan a través de F-Droid.</string>
     <string name="distribution_info">Distribución</string>
     <string name="view_on_f_droid">Ver en F-Droid</string>
-    <string name="widget_description">Reproductor de música SoundPod</string>
+    <string name="widget_description">Reproductor de música YiamTube</string>
     <string name="background_style_discription">Elige tu estilo de fondo favorito</string>
     <string name="player_background">Fondo del reproductor</string>
     <string name="style">Estilo</string>
@@ -307,7 +307,7 @@
     <string name="install_unknown_apps">Instalar aplicaciones desconocidas</string>
     <string name="storage">Almacenamiento</string>
     <string name="local_data">Datos locales</string>
-    <string name="local_data_discription">SoundPod almacena la caché y la base de datos localmente en tu dispositivo.</string>
+    <string name="local_data_discription">YiamTube almacena la caché y la base de datos localmente en tu dispositivo.</string>
     <string name="f_droid_build">Compilación de F-Droid</string>
     <string name="language_selector_not_found">No se encontraron los ajustes de idioma de la aplicación; por favor, configúrelos manualmente</string>
     <string name="play_back">Reproducción</string>

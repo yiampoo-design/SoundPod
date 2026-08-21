@@ -244,7 +244,7 @@
     <string name="seamless_update">Mise à jour transparente</string>
     <string name="seamless_update_description">Installez les mises à jour directement depuis l\'application</string>
     <string name="enable_seamless_update">Activer les mises à jour transparentes ?</string>
-    <string name="enable_seamless_update_description">Pour installer les mises à jour en interne, SoundPod doit disposer d\'une autorisation pour installer des applications inconnues.\nSinon, les mises à jour seront enregistrées dans votre dossier « Téléchargements ».</string>
+    <string name="enable_seamless_update_description">Pour installer les mises à jour en interne, YiamTube doit disposer d\'une autorisation pour installer des applications inconnues.\nSinon, les mises à jour seront enregistrées dans votre dossier « Téléchargements ».</string>
     <string name="permissions">Autorisations</string>
     <string name="notifications">Notifications</string>
     <string name="update_now">Mettre à jour maintenant</string>
@@ -285,7 +285,7 @@
     <string name="updates_handled_by_fdroid">Les mises à jour de cette version sont gérées via F-Droid</string>
     <string name="distribution_info">Distribution</string>
     <string name="view_on_f_droid">Voir sur F-Droid</string>
-    <string name="widget_description">Lecteur de Musique SoundPod</string>
+    <string name="widget_description">Lecteur de Musique YiamTube</string>
     <string name="background_style_discription">Choisissez le style d\'arrière-plan qui vous plaît</string>
     <string name="player_background">Arrière-plan du Lecteur</string>
     <string name="style">Style</string>
@@ -307,7 +307,7 @@
     <string name="install_unknown_apps">Installer des applications inconnues</string>
     <string name="storage">Stockage</string>
     <string name="local_data">Données Locales</string>
-    <string name="local_data_discription">SoundPod stocke le cache et la base de données localement sur votre appareil.</string>
+    <string name="local_data_discription">YiamTube stocke le cache et la base de données localement sur votre appareil.</string>
     <string name="f_droid_build">Version F-Droid</string>
     <string name="language_selector_not_found">Impossible de trouver les paramètres de langue de l\'application, Veuillez les configurer manuellement</string>
     <string name="play_back">Lecture</string>

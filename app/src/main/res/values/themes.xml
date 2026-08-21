@@ -1,6 +1,6 @@
 <resources>
 
-    <style name="Theme.SoundPod" parent="Theme.Material3.DayNight.NoActionBar">
+    <style name="Theme.YiamTube" parent="Theme.Material3.DayNight.NoActionBar">
         <item name="android:statusBarColor">@android:color/transparent</item>
         <item name="android:navigationBarColor">@android:color/transparent</item>
     </style>
@@ -8,10 +8,10 @@
     <style name="Theme.App.Starting" parent="Theme.SplashScreen">
         <item name="windowSplashScreenBackground">#000000</item>
         <item name="windowSplashScreenAnimatedIcon">@mipmap/ic_launcher_round</item>
-        <item name="postSplashScreenTheme">@style/Theme.SoundPod</item>
+        <item name="postSplashScreenTheme">@style/Theme.YiamTube</item>
     </style>
 
-    <style name="Theme.SoundPod.Settings" parent="Theme.SoundPod">
+    <style name="Theme.YiamTube.Settings" parent="Theme.YiamTube">
         <item name="android:windowNoTitle">true</item>
         <item name="android:windowActionBar">false</item>
     </style>

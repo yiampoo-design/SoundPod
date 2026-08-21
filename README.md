@@ -1,6 +1,6 @@
 <h1 align="center">
-  <img src="fastlane/metadata/android/en-US/images/icon_round.webp" width="80" alt="SoundPod Icon" style="vertical-align:middle"><br>
-  SoundPod
+  <img src="fastlane/metadata/android/en-US/images/icon_round.webp" width="80" alt="YiamTube Icon" style="vertical-align:middle"><br>
+  YiamTube
 </h1>
 
 <p align="center">

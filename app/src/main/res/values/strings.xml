@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <string name="app_name" translatable="false">SoundPod</string>
+    <string name="app_name" translatable="false">YiamTube</string>
     <string name="home">Home</string>
     <string name="songs">Songs</string>
     <string name="playlists">Playlists</string>
@@ -250,7 +250,7 @@
     <string name="seamless_update">Seamless Update</string>
     <string name="seamless_update_description">Install updates directly from app</string>
     <string name="enable_seamless_update">Enable Seamless Updates?</string>
-    <string name="enable_seamless_update_description">To install updates internally, SoundPod needs permission to install unknown apps.\n Otherwise, updates will be saved to your Downloads folder.</string>
+    <string name="enable_seamless_update_description">To install updates internally, YiamTube needs permission to install unknown apps.\n Otherwise, updates will be saved to your Downloads folder.</string>
     <string name="permissions">Permissions</string>
     <string name="notifications">Notifications</string>
     <string name="update_now">Update Now</string>
@@ -291,7 +291,7 @@
     <string name="updates_handled_by_fdroid">Updates for this version are handled through the F-Droid</string>
     <string name="distribution_info">Distribution</string>
     <string name="view_on_f_droid">View on F-Droid</string>
-    <string name="widget_description">SoundPod Music Player</string>
+    <string name="widget_description">YiamTube Music Player</string>
     <string name="background_style_discription">Choose your preferred background style</string>
     <string name="player_background">Player Background</string>
     <string name="style">Style</string>
@@ -313,7 +313,7 @@
     <string name="install_unknown_apps">Install Unknown Apps</string>
     <string name="storage">Storage</string>
     <string name="local_data">Local Data</string>
-    <string name="local_data_discription">SoundPod stores cache and database locally on your device.</string>
+    <string name="local_data_discription">YiamTube stores cache and database locally on your device.</string>
     <string name="f_droid_build">F-Droid Build</string>
     <string name="language_selector_not_found">Couldn\'t find app language settings, please configure them manually</string>
     <string name="play_back">Playback</string>

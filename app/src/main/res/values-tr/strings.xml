@@ -244,7 +244,7 @@
     <string name="seamless_update">Seamless Update</string>
     <string name="seamless_update_description">Install updates directly from app</string>
     <string name="enable_seamless_update">Enable Seamless Updates?</string>
-    <string name="enable_seamless_update_description">To install updates internally, SoundPod needs permission to install unknown apps.\nOtherwise, updates will be saved to your Downloads folder.</string>
+    <string name="enable_seamless_update_description">To install updates internally, YiamTube needs permission to install unknown apps.\nOtherwise, updates will be saved to your Downloads folder.</string>
     <string name="permissions">Permissions</string>
     <string name="notifications">Notifications</string>
     <string name="update_now">Update Now</string>
@@ -285,7 +285,7 @@
     <string name="updates_handled_by_fdroid">Updates for this version are handled through the F-Droid</string>
     <string name="distribution_info">Distribution</string>
     <string name="view_on_f_droid">View on F-Droid</string>
-    <string name="widget_description">SoundPod Music Player</string>
+    <string name="widget_description">YiamTube Music Player</string>
     <string name="background_style_discription">Choose your preferred background style</string>
     <string name="player_background">Player Background</string>
     <string name="style">Style</string>
@@ -307,7 +307,7 @@
     <string name="install_unknown_apps">Install Unknown Apps</string>
     <string name="storage">Storage</string>
     <string name="local_data">Yerel Veri</string>
-    <string name="local_data_discription">Soundpod önbellek ve veritabanını cihazınızda yerel olarak depolar.</string>
+    <string name="local_data_discription">YiamTube önbellek ve veritabanını cihazınızda yerel olarak depolar.</string>
     <string name="f_droid_build">F-Droid Derlemesi</string>
     <string name="language_selector_not_found">Uygulama dili ayarları bulunamadı, lütfen el ile yapılandırın</string>
     <string name="play_back">Oynatma</string>

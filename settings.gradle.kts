@@ -19,7 +19,7 @@ dependencyResolutionManagement {
     }
 }
 
-rootProject.name = "SoundPod"
+rootProject.name = "YiamTube"
 
 // Modules
 include(":app")

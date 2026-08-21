@@ -1,4 +1,4 @@
-SoundPod is a minimalist, open-source music player. Built with Jetpack Compose, it offers a modern interface for streaming media using publicly accessible APIs.
+YiamTube is a minimalist, open-source music player. Built with Jetpack Compose, it offers a modern interface for streaming media using publicly accessible APIs.
 
 Key Features:
 • Background playback and persistent queue management.

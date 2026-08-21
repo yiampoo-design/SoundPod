@@ -16,11 +16,11 @@ kotlin {
 }
 
 extensions.configure<ApplicationExtension>("android") {
-    namespace = "com.github.soundpod"
+    namespace = "com.yiam.yiamtube"
     compileSdk = 37
 
     defaultConfig {
-        applicationId = "com.github.soundpod"
+        applicationId = "com.yiam.yiamtube"
         minSdk = 23
         targetSdk = 37
         versionCode = 31
