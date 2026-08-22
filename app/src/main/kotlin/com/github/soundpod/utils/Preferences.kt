@@ -70,10 +70,16 @@ const val listGesturesEnabledKey = "listGesturesEnabled"
 
 const val updateAvailableKey = "updateAvailable"
 const val appearanceUpdatedKey = "appearanceUpdated"
+const val searchResultDisplayModeKey = "searchResultDisplayMode"
 
 enum class TabStyle(val resourceId: Int) {
     Modern(R.string.modern),
     Classic(R.string.classic)
+}
+
+enum class SearchDisplayMode {
+    COMFORTABLE,
+    COMPACT
 }
 
 inline fun <reified T : Enum<T>> SharedPreferences.getEnum(
