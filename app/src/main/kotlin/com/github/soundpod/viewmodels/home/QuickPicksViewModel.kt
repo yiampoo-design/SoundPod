@@ -106,7 +106,11 @@ class QuickPicksViewModel : ViewModel() {
         val onboardingAnchorCount: Int = 0,
         val behaviorAnchorCount: Int = 0,
         val totalBehaviorPlayTimeMs: Long = 0L,
-        val latestEventTs: Long = 0L
+        val latestEventTs: Long = 0L,
+        val homeSections: Map<String, Int> = emptyMap(),
+        val sectionCandidates: Map<String, Int> = emptyMap(),
+        val sectionFailures: Map<String, Int> = emptyMap(),
+        val sectionAnchors: Map<String, String> = emptyMap()
     )
 
     enum class CandidateSource { RECENT, FREQUENT, LIKED, FOLLOWED, SEARCH, EXPLORATION, TRENDING, RANDOM }
@@ -135,6 +139,12 @@ class QuickPicksViewModel : ViewModel() {
     private data class ProviderResult(
         val candidates: List<RecommendationCandidate>,
         val failures: Map<String, Int> = emptyMap()
+    )
+
+    private data class SectionFetchResult<T>(
+        val anchor: TasteAnchor,
+        val items: List<T>,
+        val errorKey: String? = null
     )
 
     data class Candidate(
@@ -659,6 +669,7 @@ class QuickPicksViewModel : ViewModel() {
                 val onboardingAnchorCount = finalAnchors.count { it.category == "ONBOARDING" }
                 val behaviorAnchorCount = finalAnchors.size - onboardingAnchorCount
                 Log.i(TAG, "V4 tasteAnchors=${finalAnchors.map { "${it.artistName}(${it.category})" }} onboardingWeight=$onboardingWeight")
+                val sectionAnchors = finalAnchors.take(3)
 
                 // === SEARCH-DRIVEN EXPANSION: search each anchor (isolated per-async, no shared mutation) ===
                 val searchJobs = finalAnchors.map { anchor ->
@@ -698,6 +709,68 @@ class QuickPicksViewModel : ViewModel() {
                             ProviderResult(candidates, emptyMap())
                         } catch (_: Exception) {
                             ProviderResult(emptyList(), emptyMap())
+                        }
+                    }
+                }
+                // === HOME SECTION PROVIDERS (albums/artists/playlists) — parallel, isolated, thread-safe ===
+                val sectionAlbumJobs = sectionAnchors.map { anchor ->
+                    async {
+                        try {
+                            val res = Innertube.searchPage(
+                                query = anchor.artistName,
+                                params = Innertube.SearchFilter.Album.value,
+                                fromMusicShelfRendererContent = Innertube.AlbumItem.Companion::from
+                            )?.getOrNull()
+                            val items = res?.items?.take(5) ?: emptyList()
+                            SectionFetchResult(anchor, items, null)
+                        } catch (_: Exception) {
+                            SectionFetchResult<Innertube.AlbumItem>(anchor, emptyList(), "ALBUM_SEARCH_FAILED")
+                        }
+                    }
+                }
+                val sectionArtistJobs = sectionAnchors.map { anchor ->
+                    async {
+                        try {
+                            val res = Innertube.searchPage(
+                                query = anchor.artistName,
+                                params = Innertube.SearchFilter.Artist.value,
+                                fromMusicShelfRendererContent = Innertube.ArtistItem.Companion::from
+                            )?.getOrNull()
+                            var items = res?.items?.take(8) ?: emptyList()
+                            val filtered = items.filterNot { it.info?.name?.equals(anchor.artistName, ignoreCase = true) == true }
+                            if (filtered.isNotEmpty()) items = filtered
+                            if (items.isEmpty() || (items.size == 1 && items.first().info?.name?.equals(anchor.artistName, ignoreCase = true) == true)) {
+                                try {
+                                    val weakRes = Innertube.searchPage(
+                                        query = "${anchor.artistName} similar",
+                                        params = Innertube.SearchFilter.Artist.value,
+                                        fromMusicShelfRendererContent = Innertube.ArtistItem.Companion::from
+                                    )?.getOrNull()
+                                    val weakItems = weakRes?.items?.take(8) ?: emptyList()
+                                    val weakFiltered = weakItems.filterNot { it.info?.name?.equals(anchor.artistName, ignoreCase = true) == true }
+                                    val merged = (filtered + weakFiltered).distinctBy { it.key }.take(8)
+                                    if (merged.isNotEmpty()) items = merged
+                                } catch (_: Exception) {}
+                            }
+                            val limited = items.take(5)
+                            SectionFetchResult(anchor, limited, null)
+                        } catch (_: Exception) {
+                            SectionFetchResult<Innertube.ArtistItem>(anchor, emptyList(), "ARTIST_SEARCH_FAILED")
+                        }
+                    }
+                }
+                val sectionPlaylistJobs = sectionAnchors.map { anchor ->
+                    async {
+                        try {
+                            val res = Innertube.searchPage(
+                                query = anchor.artistName,
+                                params = Innertube.SearchFilter.CommunityPlaylist.value,
+                                fromMusicShelfRendererContent = Innertube.PlaylistItem.Companion::from
+                            )?.getOrNull()
+                            val items = res?.items?.take(5) ?: emptyList()
+                            SectionFetchResult(anchor, items, null)
+                        } catch (_: Exception) {
+                            SectionFetchResult<Innertube.PlaylistItem>(anchor, emptyList(), "PLAYLIST_SEARCH_FAILED")
                         }
                     }
                 }
@@ -839,17 +912,98 @@ class QuickPicksViewModel : ViewModel() {
                 }
                 val finalSourceCountsSnapshot = finalSourceCounts.toMap()
 
+                // === HOME SECTIONS: aggregate albums/artists/playlists (sequential after awaitAll, failure isolated) ===
+                val sectionAlbumResults = try { sectionAlbumJobs.awaitAll().toList() } catch (_: Exception) { emptyList<SectionFetchResult<Innertube.AlbumItem>>() }
+                val sectionArtistResults = try { sectionArtistJobs.awaitAll().toList() } catch (_: Exception) { emptyList<SectionFetchResult<Innertube.ArtistItem>>() }
+                val sectionPlaylistResults = try { sectionPlaylistJobs.awaitAll().toList() } catch (_: Exception) { emptyList<SectionFetchResult<Innertube.PlaylistItem>>() }
+
+                val albumSeen = mutableSetOf<String>()
+                val albumPerAnchorCount = mutableMapOf<String, Int>()
+                val albumCandidatesRaw = sectionAlbumResults.sumOf { it.items.size }
+                val albumAggregated = mutableListOf<Innertube.AlbumItem>()
+                val albumFailures = mutableMapOf<String, Int>()
+                sectionAlbumResults.forEach { res -> if (res.errorKey != null) albumFailures[res.errorKey] = (albumFailures[res.errorKey] ?: 0) + 1 }
+                for (res in sectionAlbumResults) {
+                    var takenForThisAnchor = albumPerAnchorCount[res.anchor.artistName] ?: 0
+                    for (album in res.items) {
+                        if (takenForThisAnchor >= 3) break
+                        val key = album.key
+                        if (key.isBlank() || !albumSeen.add(key)) continue
+                        albumAggregated.add(album)
+                        takenForThisAnchor++
+                        albumPerAnchorCount[res.anchor.artistName] = takenForThisAnchor
+                        if (albumAggregated.size >= 12) break
+                    }
+                    if (albumAggregated.size >= 12) break
+                }
+                val finalAlbums = albumAggregated.take(8).toList()
+                val artistSeen = mutableSetOf<String>()
+                val artistPerAnchorCount = mutableMapOf<String, Int>()
+                val artistCandidatesRaw = sectionArtistResults.sumOf { it.items.size }
+                val artistAggregated = mutableListOf<Innertube.ArtistItem>()
+                val artistFailures = mutableMapOf<String, Int>()
+                sectionArtistResults.forEach { res -> if (res.errorKey != null) artistFailures[res.errorKey] = (artistFailures[res.errorKey] ?: 0) + 1 }
+                for (res in sectionArtistResults) {
+                    var taken = artistPerAnchorCount[res.anchor.artistName] ?: 0
+                    for (artist in res.items) {
+                        if (taken >= 3) break
+                        val key = artist.key
+                        if (key.isBlank() || !artistSeen.add(key)) continue
+                        if (artist.info?.name?.equals(res.anchor.artistName, ignoreCase = true) == true) continue
+                        artistAggregated.add(artist)
+                        taken++
+                        artistPerAnchorCount[res.anchor.artistName] = taken
+                        if (artistAggregated.size >= 12) break
+                    }
+                    if (artistAggregated.size >= 12) break
+                }
+                val finalArtists = artistAggregated.take(8).toList()
+                val playlistSeen = mutableSetOf<String>()
+                val playlistPerAnchorCount = mutableMapOf<String, Int>()
+                val playlistCandidatesRaw = sectionPlaylistResults.sumOf { it.items.size }
+                val playlistAggregated = mutableListOf<Innertube.PlaylistItem>()
+                val playlistFailures = mutableMapOf<String, Int>()
+                sectionPlaylistResults.forEach { res -> if (res.errorKey != null) playlistFailures[res.errorKey] = (playlistFailures[res.errorKey] ?: 0) + 1 }
+                for (res in sectionPlaylistResults) {
+                    var taken = playlistPerAnchorCount[res.anchor.artistName] ?: 0
+                    for (pl in res.items) {
+                        if (taken >= 3) break
+                        val key = pl.key
+                        if (key.isBlank() || !playlistSeen.add(key)) continue
+                        playlistAggregated.add(pl)
+                        taken++
+                        playlistPerAnchorCount[res.anchor.artistName] = taken
+                        if (playlistAggregated.size >= 12) break
+                    }
+                    if (playlistAggregated.size >= 12) break
+                }
+                val finalPlaylists = playlistAggregated.take(8).toList()
+                Log.i(TAG, "HomeSections albums=${finalAlbums.size}(${albumCandidatesRaw} cand) artists=${finalArtists.size}(${artistCandidatesRaw} cand) playlists=${finalPlaylists.size}(${playlistCandidatesRaw} cand) anchors=${sectionAnchors.map { it.artistName }}")
+
+                val homeSectionsMap = mapOf("albums" to finalAlbums.size, "artists" to finalArtists.size, "playlists" to finalPlaylists.size)
+                val sectionCandidatesMap = mapOf("albums" to albumCandidatesRaw, "artists" to artistCandidatesRaw, "playlists" to playlistCandidatesRaw)
+                val sectionFailuresCombined = mutableMapOf<String, Int>().apply {
+                    putAll(albumFailures)
+                    putAll(artistFailures)
+                    putAll(playlistFailures)
+                }.toMap()
+                val sectionAnchorsMap = mapOf(
+                    "albums" to sectionAlbumResults.joinToString(",") { it.anchor.artistName },
+                    "artists" to sectionArtistResults.joinToString(",") { it.anchor.artistName },
+                    "playlists" to sectionPlaylistResults.joinToString(",") { it.anchor.artistName }
+                )
+
                 val mergedPage = if (finalSongsSnapshot.isNotEmpty()) {
                     Innertube.RelatedPage(
                         songs = finalSongsSnapshot,
-                        playlists = emptyList(),
-                        albums = emptyList(),
-                        artists = emptyList()
+                        playlists = finalPlaylists,
+                        albums = finalAlbums,
+                        artists = finalArtists
                     )
                 } else {
-                    // Fallback to charts
+                    // Fallback to charts but still include sections if available
                     val chartFallback = chartsDeferred.await().orEmpty()
-                    if (chartFallback.isNotEmpty()) Innertube.RelatedPage(songs = chartFallback.take(40)) else null
+                    if (chartFallback.isNotEmpty()) Innertube.RelatedPage(songs = chartFallback.take(40), playlists = finalPlaylists, albums = finalAlbums, artists = finalArtists) else null
                 }
 
                 val finalResult = if (mergedPage != null && !mergedPage.songs.isNullOrEmpty()) {
@@ -893,7 +1047,11 @@ class QuickPicksViewModel : ViewModel() {
                     onboardingAnchorCount = onboardingAnchorCount,
                     behaviorAnchorCount = behaviorAnchorCount,
                     totalBehaviorPlayTimeMs = totalBehaviorPlayTimeMs,
-                    latestEventTs = latestEventTs
+                    latestEventTs = latestEventTs,
+                    homeSections = homeSectionsMap,
+                    sectionCandidates = sectionCandidatesMap,
+                    sectionFailures = sectionFailuresCombined,
+                    sectionAnchors = sectionAnchorsMap
                 )
                 if (myToken == generationToken.get()) {
                     finalResult.getOrNull()?.let {

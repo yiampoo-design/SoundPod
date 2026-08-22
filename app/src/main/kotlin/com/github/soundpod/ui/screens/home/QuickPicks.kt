@@ -367,6 +367,26 @@ fun QuickPicks(
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
                             Text(
+                                text = "homeSections: albums=${dbg.homeSections["albums"] ?: 0} artists=${dbg.homeSections["artists"] ?: 0} playlists=${dbg.homeSections["playlists"] ?: 0}",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                            Text(
+                                text = "sectionCandidates: ${dbg.sectionCandidates.entries.joinToString { "${it.key}=${it.value}" }}",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                            Text(
+                                text = "sectionFailures: ${dbg.sectionFailures.entries.joinToString { "${it.key}=${it.value}" }}",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                            Text(
+                                text = "sectionAnchors: ${dbg.sectionAnchors.entries.joinToString { "${it.key}=${it.value}" }}",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                            Text(
                                 text = "fingerprint: ${dbg.fingerprint}",
                                 style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
