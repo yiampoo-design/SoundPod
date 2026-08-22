@@ -27,7 +27,6 @@ import androidx.media3.common.util.UnstableApi
 import androidx.media3.exoplayer.DefaultLoadControl
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.RenderersFactory
-import androidx.media3.exoplayer.analytics.PlaybackStatsListener
 import androidx.media3.exoplayer.audio.AudioRendererEventListener
 import androidx.media3.exoplayer.audio.DefaultAudioSink
 import androidx.media3.exoplayer.audio.DefaultAudioSink.DefaultAudioProcessorChain
@@ -101,6 +100,7 @@ class PlayerService : InvincibleService(), Player.Listener,
     private lateinit var bitmapProvider: BitmapProvider
     private lateinit var mediaSourceProvider: PlayerMediaSourceProvider
     private lateinit var preCacheManager: PreCacheManager
+    private lateinit var analyticsTracker: PlaybackAnalyticsTracker
 
     private val coroutineScope = CoroutineScope(Dispatchers.IO) + SupervisorJob()
 
@@ -203,7 +203,8 @@ class PlayerService : InvincibleService(), Player.Listener,
             preferences.getFloat(playbackPitchKey, 1f)
         )
         player.addListener(this)
-        player.addAnalyticsListener(PlaybackStatsListener(false, PlaybackAnalyticsTracker()))
+        val analyticsTracker = PlaybackAnalyticsTracker(player)
+        this.analyticsTracker = analyticsTracker
 
         audioEffectManager = AudioEffectManager(this, player, coroutineScope)
         radioManager = YouTubeRadioManager(player, coroutineScope)
@@ -270,6 +271,7 @@ class PlayerService : InvincibleService(), Player.Listener,
         queueManager.saveQueue(isPersistentQueueEnabled)
         preferences.unregisterOnSharedPreferenceChangeListener(this)
 
+        analyticsTracker.release()
         player.removeListener(this)
         player.stop()
         player.release()
@@ -612,6 +614,7 @@ class PlayerService : InvincibleService(), Player.Listener,
         val cache get() = this@PlayerService.cacheManager.cache
         val preCacheManager get() = this@PlayerService.preCacheManager
         val mediaSession get() = this@PlayerService.mediaSessionManager.mediaSession
+        val analyticsTracker get() = this@PlayerService.analyticsTracker
 
         val sleepTimerMillisLeft get() = this@PlayerService.sleepTimerManager.millisLeft
 

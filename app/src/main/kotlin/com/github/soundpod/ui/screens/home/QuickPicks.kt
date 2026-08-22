@@ -1,8 +1,13 @@
 package com.github.soundpod.ui.screens.home
 
   import android.annotation.SuppressLint
-  import androidx.compose.animation.Crossfade
-  import androidx.compose.animation.ExperimentalAnimationApi
+import androidx.compose.animation.Crossfade
+import androidx.compose.animation.ExperimentalAnimationApi
+import androidx.compose.animation.core.LinearEasing
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.tween
   import androidx.compose.foundation.ExperimentalFoundationApi
   import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.BoxWithConstraints
@@ -33,15 +38,21 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.foundation.clickable
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.res.painterResource
@@ -55,6 +66,7 @@ import coil3.compose.AsyncImage
 import com.github.core.ui.LocalAppearance
 import com.github.innertube.Innertube
 import com.github.innertube.models.NavigationEndpoint
+import com.github.soundpod.BuildConfig
 import com.github.soundpod.LocalPlayerPadding
 import com.github.soundpod.LocalPlayerServiceBinder
 import com.github.soundpod.R
@@ -142,11 +154,35 @@ fun QuickPicks(
         val error = result?.exceptionOrNull() ?: if (result != null && related == null) Exception("Empty response") else null
 
         if (related != null) {
-            Text(
-                text = stringResource(id = R.string.quick_picks),
-                style = MaterialTheme.typography.titleMedium,
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
                 modifier = sectionTextModifier.padding(top = 8.dp)
-            )
+            ) {
+                Text(
+                    text = stringResource(id = R.string.quick_picks),
+                    style = MaterialTheme.typography.titleMedium,
+                    modifier = Modifier.weight(1f)
+                )
+                val infiniteTransition = rememberInfiniteTransition(label = "refresh")
+                val rotation by infiniteTransition.animateFloat(
+                    initialValue = 0f,
+                    targetValue = 360f,
+                    animationSpec = infiniteRepeatable(
+                        animation = tween(durationMillis = 1000, easing = LinearEasing)
+                    ),
+                    label = "refreshRotation"
+                )
+                IconButton(
+                    onClick = { viewModel.loadQuickPicks(quickPicksSource = quickPicksSource, forceRefresh = true) },
+                    enabled = !viewModel.isRefreshing
+                ) {
+                    Icon(
+                        imageVector = Icons.Outlined.Refresh,
+                        contentDescription = "Refresh",
+                        modifier = if (viewModel.isRefreshing) Modifier.graphicsLayer { rotationZ = rotation } else Modifier
+                    )
+                }
+            }
 
             LazyHorizontalGrid(
                 state = quickPicksLazyGridState,
@@ -273,6 +309,62 @@ fun QuickPicks(
                 LazyRow(contentPadding = PaddingValues(horizontal = 8.dp)) {
                     items(items = playlists.filter { it.key.isNotEmpty() }.distinctBy { it.key }, key = Innertube.PlaylistItem::key) { playlist ->
                         PlaylistItem(modifier = Modifier.widthIn(max = itemSize), playlist = playlist, onClick = { onPlaylistClick(playlist.key) })
+                    }
+                }
+            }
+
+            if (BuildConfig.DEBUG) {
+                viewModel.debugState?.let { dbg ->
+                    Spacer(modifier = Modifier.height(Dimensions.spacer))
+                    var expanded by remember { mutableStateOf(false) }
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 16.dp)
+                            .clickable { expanded = !expanded }
+                            .padding(vertical = 8.dp)
+                    ) {
+                        Text(
+                            text = "Recommendation Debug \u25BC fp=${dbg.fingerprintShort} nonce=${dbg.generationNonce} pool=${dbg.candidatePoolSize} plays=${dbg.meaningfulPlayCount} personalization=${String.format("%.2f", dbg.personalizationStrength)} final=${dbg.finalResultCount} cacheHit=${dbg.cacheHit} src=${dbg.generationSource} personalized=${String.format("%.0f", dbg.personalizedPercent)}%",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                        if (expanded) {
+                            Spacer(modifier = Modifier.height(4.dp))
+                            Text(
+                                text = "tasteAnchors: ${dbg.tasteAnchors.joinToString()}",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                            Text(
+                                text = "providers: ${dbg.providerCounts.entries.joinToString { "${it.key}=${it.value}" }}",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                            Text(
+                                text = "finalSources: ${dbg.finalSourceCounts.entries.joinToString { "${it.key}=${it.value}" }}",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                            Text(
+                                text = "failures: ${dbg.providerFailures.entries.joinToString { "${it.key}=${it.value}" }}",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                            Text(
+                                text = "fingerprint: ${dbg.fingerprint}",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                            Spacer(modifier = Modifier.height(4.dp))
+                            binder?.analyticsTracker?.let { tracker ->
+                                Text(
+                                    text = "analytics: mediaId=${tracker.currentMediaId} accumMs=${tracker.accumulatedPlayMs} committed=${tracker.lastCommittedSongId} committedMs=${tracker.lastCommittedPlayMs} events=${tracker.eventCount}",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                        }
                     }
                 }
             }

@@ -501,6 +501,21 @@ interface Database {
     @Query("SELECT COUNT (*) FROM Event")
     fun eventsCount(): Flow<Int>
 
+    @Query("SELECT MAX(timestamp) FROM Event")
+    fun maxEventTimestamp(): Flow<Long?>
+
+    @Query("SELECT MAX(timestamp) FROM Event")
+    suspend fun getMaxEventTimestamp(): Long?
+
+    @Query("SELECT COUNT(*) FROM Event")
+    suspend fun getEventCount(): Int
+
+    @Query("SELECT COALESCE(SUM(playTime),0) FROM Event")
+    fun totalEventPlayTimeFlow(): Flow<Long>
+
+    @Query("SELECT COALESCE(SUM(playTime),0) FROM Event")
+    suspend fun getTotalEventPlayTime(): Long
+
     @Query("DELETE FROM Event")
     fun clearEvents()
 
