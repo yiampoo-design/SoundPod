@@ -352,6 +352,21 @@ fun QuickPicks(
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
                             Text(
+                                text = "onboarding: completed=${dbg.onboardingCompleted} skipped=${dbg.onboardingSkipped} weight=${String.format("%.2f", dbg.onboardingWeight)} genres=${dbg.onboardingGenres.joinToString()} eras=${dbg.onboardingEras.joinToString()} discovery=${dbg.onboardingDiscovery}",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                            Text(
+                                text = "onboardingAnchors=${dbg.onboardingAnchorCount} behavior=${dbg.behaviorAnchorCount}",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                            Text(
+                                text = "behavior: events=${dbg.meaningfulPlayCount} totalPlayMs=${dbg.totalBehaviorPlayTimeMs} latestEventTs=${dbg.latestEventTs}",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                            Text(
                                 text = "fingerprint: ${dbg.fingerprint}",
                                 style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant

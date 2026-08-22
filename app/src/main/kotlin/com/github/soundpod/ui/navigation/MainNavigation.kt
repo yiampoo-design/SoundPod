@@ -36,6 +36,10 @@ import com.github.soundpod.ui.screens.playlist.FavoritePlaylistScreen
 import com.github.soundpod.ui.screens.playlist.OnlinePlaylistScreen
 import com.github.soundpod.ui.screens.search.NewSearchLayout
 import com.github.soundpod.ui.screens.search.NewSearchResult
+import com.github.soundpod.ui.screens.onboarding.OnboardingScreen
+import com.github.soundpod.appContext
+import com.github.soundpod.utils.preferences
+import com.github.soundpod.utils.isOnboardingCompleted
 import kotlinx.coroutines.launch
 import kotlin.reflect.KClass
 
@@ -49,9 +53,10 @@ fun MainNavigation(
 ) {
     val scope = rememberCoroutineScope()
 
+    val onboardingCompleted = appContext.preferences.isOnboardingCompleted()
     NavHost(
         navController = navController,
-        startDestination = Routes.Home,
+        startDestination = if (!onboardingCompleted) Routes.Onboarding else Routes.Home,
         enterTransition = { Transitions.enter() },
         exitTransition = { Transitions.exit() },
         popEnterTransition = { Transitions.popEnter() },
@@ -89,6 +94,23 @@ fun MainNavigation(
                     }
                 }
             }
+        }
+
+        composable(route = Routes.Onboarding::class) {
+            OnboardingScreen(
+                onFinished = {
+                    navController.navigate(Routes.Home) {
+                        popUpTo(Routes.Onboarding) { inclusive = true }
+                        launchSingleTop = true
+                    }
+                },
+                onSkipped = {
+                    navController.navigate(Routes.Home) {
+                        popUpTo(Routes.Onboarding) { inclusive = true }
+                        launchSingleTop = true
+                    }
+                }
+            )
         }
 
         playerComposable(route = Routes.Home::class) {
@@ -215,3 +237,4 @@ fun MainNavigation(
         }
     }
 }
+

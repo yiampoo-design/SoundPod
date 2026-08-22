@@ -21,6 +21,14 @@ import com.github.soundpod.models.SearchQuery
 import com.github.soundpod.models.Song
 import com.github.soundpod.utils.ScreenCache
 import com.github.soundpod.utils.asMediaItem
+import com.github.soundpod.utils.computeOnboardingWeight
+import com.github.soundpod.utils.getOnboardingArtists
+import com.github.soundpod.utils.getOnboardingDiscovery
+import com.github.soundpod.utils.getOnboardingEras
+import com.github.soundpod.utils.getOnboardingGenres
+import com.github.soundpod.utils.isOnboardingCompleted
+import com.github.soundpod.utils.isOnboardingSkipped
+import com.github.soundpod.utils.onboardingVersionKey
 import com.github.soundpod.utils.isScreenCacheEnabledKey
 import com.github.soundpod.utils.preferences
 import com.github.soundpod.utils.quickPicksCustomGenreKey
@@ -88,14 +96,24 @@ class QuickPicksViewModel : ViewModel() {
         val finalSourceCounts: Map<String, Int> = emptyMap(),
         val providerFailures: Map<String, Int> = emptyMap(),
         val tasteAnchors: List<String> = emptyList(),
-        val personalizedPercent: Double = 0.0
+        val personalizedPercent: Double = 0.0,
+        val onboardingCompleted: Boolean = false,
+        val onboardingSkipped: Boolean = false,
+        val onboardingWeight: Double = 0.0,
+        val onboardingGenres: List<String> = emptyList(),
+        val onboardingEras: List<String> = emptyList(),
+        val onboardingDiscovery: String = "BALANCED",
+        val onboardingAnchorCount: Int = 0,
+        val behaviorAnchorCount: Int = 0,
+        val totalBehaviorPlayTimeMs: Long = 0L,
+        val latestEventTs: Long = 0L
     )
 
     enum class CandidateSource { RECENT, FREQUENT, LIKED, FOLLOWED, SEARCH, EXPLORATION, TRENDING, RANDOM }
 
     enum class RecSource(val weight: Double) {
         ANCHOR_RECENT(1.00), ANCHOR_FREQUENT(0.90), ANCHOR_LIKED(0.90),
-        ANCHOR_FOLLOWED(0.85), ANCHOR_SEARCH(0.50),
+        ANCHOR_FOLLOWED(0.85), ANCHOR_SEARCH(0.50), ONBOARDING(0.80),
         SEARCH(0.50), EXPLORATION(0.20),
         ARTIST(0.00), ALBUM(0.00), RELATED(0.00)
     }
@@ -242,8 +260,12 @@ class QuickPicksViewModel : ViewModel() {
             val latestSearchId = db.queries("%").first().maxOfOrNull { it.id } ?: 0
             val followedHash = db.followedArtists().first().map { it.id }.sorted().joinToString(",").hashCode()
             val customGenre = if (source == QuickPicksSource.Custom) appContext.preferences.getString(quickPicksCustomGenreKey, "ROCK") ?: "ROCK" else source.name
+            val onboardingCompleted = appContext.preferences.isOnboardingCompleted()
+            val onboardingArtistsHash = appContext.preferences.getOnboardingArtists().joinToString(",") { it.name + (it.browseId ?: "") }.hashCode()
+            val onboardingDiscovery = appContext.preferences.getOnboardingDiscovery().name
+            val onboardingVersion = appContext.preferences.getInt(onboardingVersionKey, 0)
             // Raw fingerprint source as specified
-            val raw = "eventMaxTs=${eventMaxTs}_eventCount=${eventCount}_eventPlayTime=${eventPlayTime}_likedMax=${latestLikedAt}_likedHash=${likedHash}_searchMaxId=${latestSearchId}_followedHash=${followedHash}_source=${source.name}_genre=${customGenre}"
+            val raw = "eventMaxTs=${eventMaxTs}_eventCount=${eventCount}_eventPlayTime=${eventPlayTime}_likedMax=${latestLikedAt}_likedHash=${likedHash}_searchMaxId=${latestSearchId}_followedHash=${followedHash}_source=${source.name}_genre=${customGenre}_onbComp=${onboardingCompleted}_onbArt=${onboardingArtistsHash}_onbDisc=${onboardingDiscovery}_onbVer=${onboardingVersion}"
             val hash = raw.hashCode().let { if (it == Int.MIN_VALUE) 0 else kotlin.math.abs(it) }.toString(36)
             hash
         } catch (_: Exception) {
@@ -396,7 +418,7 @@ class QuickPicksViewModel : ViewModel() {
                         val maxPlayTime = (historyList + trendingList + favoritesList + frequentList).maxOfOrNull { it.totalPlayTimeMs }?.coerceAtLeast(1) ?: 1L
                         val recentlyShownIds = recentlyShownSet
 
-                        val meaningfulPlayCount = historyList.size
+                        val meaningfulPlayCount = db.getEventCount()
                         isColdStart = meaningfulPlayCount < SUFFICIENT_HISTORY_THRESHOLD
                         val personalizationStrength = computePersonalizationStrength(meaningfulPlayCount)
                         val explorationRatio = computeExplorationRatio(personalizationStrength)
@@ -612,8 +634,31 @@ class QuickPicksViewModel : ViewModel() {
                     }
                 }
 
-                val finalAnchors = tasteAnchors.distinctBy { it.artistName.lowercase() }.take(5)
-                Log.i(TAG, "V4 tasteAnchors=${finalAnchors.map { "${it.artistName}(${it.category})" }}")
+                // Onboarding bootstrap anchors with weight decay (Event-based)
+                val onboardingArtistsStored = appContext.preferences.getOnboardingArtists()
+                val onboardingCompleted = appContext.preferences.isOnboardingCompleted()
+                val onboardingSkipped = appContext.preferences.isOnboardingSkipped()
+                val onboardingGenresStored = appContext.preferences.getOnboardingGenres()
+                val onboardingErasStored = appContext.preferences.getOnboardingEras()
+                val onboardingDiscoveryStored = appContext.preferences.getOnboardingDiscovery()
+                val behaviorEventCount = db.getEventCount()
+                val totalBehaviorPlayTimeMs = db.getTotalEventPlayTime()
+                val latestEventTs = db.getMaxEventTimestamp() ?: 0L
+                val rawOnboardingWeight = computeOnboardingWeight(behaviorEventCount)
+                val onboardingWeight = if (onboardingSkipped || onboardingArtistsStored.isEmpty()) 0.0 else rawOnboardingWeight
+                if (onboardingCompleted && !onboardingSkipped && onboardingArtistsStored.isNotEmpty()) {
+                    onboardingArtistsStored.forEach { oa ->
+                        if (tasteAnchors.none { it.artistName.equals(oa.name, ignoreCase = true) }) {
+                            tasteAnchors.add(TasteAnchor(oa.name, "ONBOARDING", onboardingWeight))
+                        }
+                    }
+                }
+                // Sort by weight descending so decay naturally demotes onboarding, then distinct and take 5
+                val sortedAnchors = tasteAnchors.sortedByDescending { it.weight }
+                val finalAnchors = sortedAnchors.distinctBy { it.artistName.lowercase() }.take(5)
+                val onboardingAnchorCount = finalAnchors.count { it.category == "ONBOARDING" }
+                val behaviorAnchorCount = finalAnchors.size - onboardingAnchorCount
+                Log.i(TAG, "V4 tasteAnchors=${finalAnchors.map { "${it.artistName}(${it.category})" }} onboardingWeight=$onboardingWeight")
 
                 // === SEARCH-DRIVEN EXPANSION: search each anchor (isolated per-async, no shared mutation) ===
                 val searchJobs = finalAnchors.map { anchor ->
@@ -630,6 +675,7 @@ class QuickPicksViewModel : ViewModel() {
                                 "FREQUENT" -> RecSource.ANCHOR_FREQUENT
                                 "LIKED" -> RecSource.ANCHOR_LIKED
                                 "FOLLOWED" -> RecSource.ANCHOR_FOLLOWED
+                                "ONBOARDING" -> RecSource.ONBOARDING
                                 else -> RecSource.ANCHOR_SEARCH
                             }
                             val candidates = items.map { song -> RecommendationCandidate(song, source, anchor.artistName, source.weight, anchor.weight) }
@@ -701,10 +747,16 @@ class QuickPicksViewModel : ViewModel() {
                 val dedupedValuesSnapshot = dedupedSnapshot.values.toList()
                 Log.i(TAG, "V4 pool=$candidatePoolSize providers=$providerCountsSnapshot token=$myToken")
 
-                // === QUOTA-BASED FINAL RANKING ===
-                val meaningfulPlayCount = recentHistory.size
+                // === QUOTA-BASED FINAL RANKING (Event-based) ===
+                val meaningfulPlayCount = behaviorEventCount
                 val personalizationStrength = computePersonalizationStrength(meaningfulPlayCount)
-                val explorationRatio = computeExplorationRatio(personalizationStrength)
+                var explorationRatio = computeExplorationRatio(personalizationStrength)
+                // Discovery preference adjustment
+                explorationRatio = when (onboardingDiscoveryStored) {
+                    com.github.soundpod.utils.DiscoveryPreference.FAMILIAR -> explorationRatio - 0.10
+                    com.github.soundpod.utils.DiscoveryPreference.EXPLORATORY -> explorationRatio + 0.10
+                    else -> explorationRatio
+                }.coerceIn(0.10, 0.70)
 
                 val recentlyShown = recentlyShownSet
                 val seedSongIds = seedSongs.map { it.id }.toSet()
@@ -831,7 +883,17 @@ class QuickPicksViewModel : ViewModel() {
                     finalSourceCounts = finalSourceCountsSnapshot,
                     providerFailures = providerFailuresSnapshot,
                     tasteAnchors = finalAnchors.map { "${it.artistName}(${it.category})" },
-                    personalizedPercent = personalizedPercent
+                    personalizedPercent = personalizedPercent,
+                    onboardingCompleted = onboardingCompleted,
+                    onboardingSkipped = onboardingSkipped,
+                    onboardingWeight = onboardingWeight,
+                    onboardingGenres = onboardingGenresStored,
+                    onboardingEras = onboardingErasStored,
+                    onboardingDiscovery = onboardingDiscoveryStored.name,
+                    onboardingAnchorCount = onboardingAnchorCount,
+                    behaviorAnchorCount = behaviorAnchorCount,
+                    totalBehaviorPlayTimeMs = totalBehaviorPlayTimeMs,
+                    latestEventTs = latestEventTs
                 )
                 if (myToken == generationToken.get()) {
                     finalResult.getOrNull()?.let {
